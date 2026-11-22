@@ -26,6 +26,7 @@ from fastapi import FastAPI, Request, Form, UploadFile, File, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from fastapi.templating import Jinja2Templates
 
 from . import db, content, auth, mailer
@@ -510,11 +511,24 @@ def passo_ler(request: Request, slug: str):
 def passo_slides(request: Request, slug: str):
     member = auth.require_member(request)
     devo = devo_ou_404(slug)
-    tem_pdf = content.has_file(slug, devo.get("apresentacao", "apresentacao.pdf"))
+    pdf_nome = devo.get("apresentacao", "apresentacao.pdf")
+    tem_pdf = content.has_file(slug, pdf_nome)
+    total = content.gerar_slides(slug, pdf_nome) if tem_pdf else 0   # gera na 1ª abertura se ainda não existem
     with db.session() as conn:
         mark_step(conn, member["id"], slug, "slides")
-    return templates.TemplateResponse(request, "slides.html", {"devo": devo, "tem_pdf": tem_pdf,
+    return templates.TemplateResponse(request, "slides.html", {
+        "devo": devo, "tem_pdf": tem_pdf, "total_slides": total,
+        "proporcao": content.slides_proporcao(slug) if total else 16 / 9,
     })
+
+
+@app.get("/d/{slug}/slide/{numero}")
+def slide_imagem(request: Request, slug: str, numero: int):
+    auth.require_member(request)
+    path = content.slide_path(slug, numero)
+    if not path:
+        raise HTTPException(404, "Slide não encontrado.")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @app.get("/d/{slug}/quiz", response_class=HTMLResponse)
@@ -731,6 +745,7 @@ async def admin_publicar(
 
     content.get_texto_html.cache_clear()
     content.get_licoes_html.cache_clear()
+    await run_in_threadpool(content.gerar_slides, slug, pdf_name)   # se falhar, a tela usa o PDF embutido
 
     return RedirectResponse("/admin?publicado=1", status_code=303)
 

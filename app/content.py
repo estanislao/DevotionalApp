@@ -1,6 +1,8 @@
 """Lê as devocionais da pasta devocionais/<slug>/ (meta.json, texto.md, quiz.json, licoes.md)."""
 import json
 import re
+import shutil
+import threading
 from pathlib import Path
 from functools import lru_cache
 import markdown as md
@@ -120,6 +122,72 @@ def get_quiz(slug: str) -> list[dict]:
         return validar_quiz(path.read_bytes())
     except ValueError:
         return []  # quiz quebrado aparece como "não publicado" em vez de erro 500
+
+
+# ---------- Slides: cada página do PDF vira uma imagem (o PDF embutido fica ilegível no celular) ----------
+
+SLIDES_PASTA = "slides"
+SLIDES_LARGURA = 1600      # px; nítido com zoom e leve o bastante para 4G
+SLIDES_MAX = 80
+_slides_lock = threading.Lock()
+
+
+def slides_arquivos(slug: str) -> list[Path]:
+    return sorted((DEVOCIONAIS_DIR / slug / SLIDES_PASTA).glob("*.jpg"))
+
+
+def slide_path(slug: str, numero: int) -> Path | None:
+    if not slug_valido(slug) or not (1 <= numero <= SLIDES_MAX):
+        return None
+    path = DEVOCIONAIS_DIR / slug / SLIDES_PASTA / f"{numero:03d}.jpg"
+    return path if path.is_file() else None
+
+
+def gerar_slides(slug: str, pdf_nome: str) -> int:
+    """Renderiza as páginas do PDF em JPEG. Devolve quantas existem (0 se não deu).
+
+    Idempotente: se as imagens já existem e são mais novas que o PDF, não refaz.
+    """
+    pdf_path = DEVOCIONAIS_DIR / slug / pdf_nome
+    if not slug_valido(slug) or not pdf_path.is_file():
+        return 0
+    pasta = DEVOCIONAIS_DIR / slug / SLIDES_PASTA
+    with _slides_lock:
+        prontos = slides_arquivos(slug)
+        if prontos and min(p.stat().st_mtime for p in prontos) >= pdf_path.stat().st_mtime:
+            return len(prontos)
+        tmp = pasta.with_name(SLIDES_PASTA + ".tmp")
+        try:
+            import pypdfium2 as pdfium
+            shutil.rmtree(tmp, ignore_errors=True)
+            tmp.mkdir(parents=True)
+            pdf = pdfium.PdfDocument(str(pdf_path))
+            total = min(len(pdf), SLIDES_MAX)
+            for i in range(total):
+                page = pdf[i]
+                img = page.render(scale=SLIDES_LARGURA / page.get_width()).to_pil().convert("RGB")
+                img.save(tmp / f"{i + 1:03d}.jpg", "JPEG", quality=88, optimize=True)
+            pdf.close()
+            shutil.rmtree(pasta, ignore_errors=True)
+            tmp.rename(pasta)
+            return total
+        except Exception as e:  # PDF estranho, disco cheio, sem permissão: a tela cai no PDF embutido
+            print(f"[slides] falha ao gerar imagens de {slug}: {e}", flush=True)
+            shutil.rmtree(tmp, ignore_errors=True)
+            return 0
+
+
+def slides_proporcao(slug: str) -> float:
+    """Largura / altura do primeiro slide (para reservar o espaço antes de a imagem carregar)."""
+    arquivos = slides_arquivos(slug)
+    if not arquivos:
+        return 16 / 9
+    try:
+        from PIL import Image
+        with Image.open(arquivos[0]) as im:
+            return round(im.width / im.height, 4)
+    except Exception:
+        return 16 / 9
 
 
 def has_file(slug: str, filename: str) -> bool:

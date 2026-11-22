@@ -112,6 +112,7 @@ Abra `http://localhost:8000`, entre como admin e publique uma devocional em `/ad
 ## Decisões tomadas (e por quê)
 
 - **SQLite, não Postgres**: um arquivo só, zero servidor extra para administrar — adequado para 4 pessoas.
+- **Slides como imagens, não PDF embutido**: ao publicar, cada página do PDF vira um JPEG de 1600 px (`pypdfium2`), mostrado em carrossel com toque para ampliar; o PDF embutido ficava ilegível no celular e no iPhone mostrava só a primeira página. Se a conversão falhar, a tela volta ao PDF embutido. Envie sempre PDF: exporte o PowerPoint ou Google Slides antes.
 - **Três atividades, não cinco passos**: o progresso conta Conteúdo (basta um entre Slides, Ouvir ou Ler, nessa ordem), Quiz e Praticar. Slides e Ler contam ao abrir a tela; Ouvir conta quando o áudio termina (ou ao tocar em "Ir para o Quiz"); Quiz ao responder todas as perguntas; Praticar ao clicar "Concluir". Nada disso exige um botão de "marcar como feito".
 - **Palavras da família**: qualquer membro deixa uma mensagem curta de ânimo (até 280 caracteres, 3 por dia) que aparece para todos em carrossel no início. Quem escreveu ou o admin pode apagar.
 - **Sem LGPD/compliance formal**: como você pediu, não tem nada de consentimento, retenção de dados ou exportação — é uma família, 4 contas, dados ficam só no seu volume Docker.
