@@ -1,3 +1,7 @@
-devocional.seudominio.com.br {
+trilhadefe.app {
     reverse_proxy app:8000
+}
+
+www.trilhadefe.app {
+    redir https://trilhadefe.app{uri} permanent
 }

@@ -44,7 +44,7 @@ rsync -avz --exclude 'app/data' ./ usuario@seu-ip:/opt/portal-devocional/
 cd /opt/portal-devocional
 cp .env.example .env
 nano .env                    # preencha SESSION_SECRET (openssl rand -hex 32) e SEED_MEMBERS
-nano Caddyfile               # troque "devocional.seudominio.com.br" pelo seu domínio real
+# Caddyfile já está com trilhadefe.app; edite só se o domínio mudar
 
 # 3. Suba
 docker compose up -d --build
