@@ -33,6 +33,8 @@ Cada publicação cria `devocionais/<data>-<titulo-slug>/` com:
 
 Você nunca mexe nisso na mão — o formulário em `/admin` cria tudo isso pra você ao publicar.
 
+> **Operação na VM** (backup, restauração, Caddy, contêiner endurecido): veja [`deploy/README.md`](deploy/README.md).
+
 ## Subir na VM da DigitalOcean
 
 Pré-requisito: Docker e Docker Compose instalados na VM, e um domínio (ou subdomínio) apontando o DNS (registro A) para o IP da VM — necessário para o Caddy emitir HTTPS sozinho.
@@ -83,6 +85,8 @@ e recarregue com `caddy validate --config /etc/caddy/Caddyfile && systemctl relo
 
 Entre como admin e acesse `/admin`. Escolha a coleção (opcional; crie antes em `/admin/colecoes`), preencha o formulário e envie os 5 arquivos — a devocional aparece na hora para todo mundo.
 
+Áudio e PDF são gravados no disco em blocos, numa pasta temporária que só vira a devocional no final, de forma atômica: qualquer recusa não deixa nada para trás. Limites: áudio 100 MB, PDF 50 MB, textos 2 MB.
+
 O formulário valida antes de gravar: data no formato AAAA-MM-DD, áudio em .mp3/.m4a/.aac/.ogg/.wav, apresentação em .pdf, `quiz.json` no formato esperado (toda pergunta com `id`, `pergunta`, `opcoes`, `correta` presente nas opções). Se algo estiver errado, nada é gravado e a tela mostra o motivo. Publicar com o mesmo título e data de uma devocional existente é recusado (apague a pasta antiga em `devocionais/` se quiser substituir).
 
 ### Backup
@@ -93,6 +97,10 @@ Na VM de produção há um backup automático (`/usr/local/bin/portal-backup.sh`
 - um espelho de `devocionais/` (sem `slides/`, que se regeram sozinhos), que não apaga o que for removido na origem.
 
 Para rodar na hora: `sudo /usr/local/bin/portal-backup.sh`. **Esses arquivos ficam na mesma VM**: para proteger de perda do disco, copie-os para fora, por exemplo com `rsync -avz usuario@servidor:/opt/backups/portal-devocional/ ~/Backups/trilhadefe/`. Em outra VM, copie o script e crie o cron equivalente.
+
+### Registro das ações do administrador
+
+Aprovar, recusar, excluir membros, redefinir senhas, publicar devocionais e mexer em coleções ficam registrados (quem, o quê, quando) em `/admin/registro`, que guarda as últimas 1000 ações.
 
 ### Contas, aprovação e senhas
 
@@ -133,6 +141,6 @@ Abra `http://localhost:8000`, entre como admin e publique uma devocional em `/ad
 - **Sem LGPD/compliance formal**: como você pediu, não tem nada de consentimento, retenção de dados ou exportação — é uma família, 4 contas, dados ficam só no seu volume Docker.
 - **Segurança proporcional**: bloqueio por 15 minutos após 5 senhas erradas (contador em memória; reinicia com o container). O app recusa iniciar sem `SESSION_SECRET`, o cookie de sessão só trafega em HTTPS, a resposta certa do quiz é conferida no servidor (nunca vem do formulário) e só os arquivos declarados no `meta.json` são servidos pela rota de mídia. Erros (404, 403, formulário incompleto) mostram uma página amigável em vez de JSON.
 - **Login por e-mail + senha com cadastro aberto e aprovação manual** (substituiu o PIN com membros fixos da primeira versão): quem entra escolhe o próprio nome; o admin é o filtro. Senhas com PBKDF2 da biblioteca padrão. E-mails pela API HTTP da Brevo via `urllib`, sem dependência nova.
-- **Controles contra abuso**: cabeçalhos de segurança em todas as respostas (CSP, HSTS, nosniff, SAMEORIGIN, Referrer-Policy, Permissions-Policy); cadastro com limite de 5 por hora por IP, campo isca e teto de 100 pendentes; login e recuperação de senha também limitados por IP. Os contadores ficam em memória e zeram ao reiniciar o container.
-- **Backup**: o servidor faz backup diário do banco (com 14 dias de retenção) e espelha as devocionais; veja a seção Backup. Falta ainda uma cópia fora da VM.
+- **Controles contra abuso e ataques comuns**: cabeçalhos de segurança em todas as respostas, com `script-src 'self'` (não há JavaScript embutido: tudo está em `/static/app.js`); POST de outro site é recusado; limite de corpo por rota (1 MB, exceto a publicação); cadastro só por convite, com campo isca e teto de pendentes; login, cadastro e recuperação limitados por IP, com os contadores no banco; Markdown dos textos sanitizado com `nh3`; mensagens e dados de formulário nunca viajam na URL (recado de uma vez só, em cookie assinado).
+- **Operação ensaiada**: backup diário conferido, restauração testada (inclusive num volume novo), contêiner endurecido, versões fixadas. Falta ainda uma cópia do backup fora da VM.
 - **PWA simples**: dá para instalar na tela do celular e abre em tela cheia, mas não funciona 100% offline (só o CSS/ícones ficam em cache) — o conteúdo em si precisa de internet.
