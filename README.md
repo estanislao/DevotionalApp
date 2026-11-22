@@ -87,9 +87,12 @@ O formulário valida antes de gravar: data no formato AAAA-MM-DD, áudio em .mp3
 
 ### Backup
 
-Dois lugares para copiar periodicamente:
-- a pasta `devocionais/` (seus arquivos originais)
-- o volume `db_data` (progresso e respostas): `docker compose exec app cat /srv/app/data/portal.db > backup-$(date +%F).db`
+Na VM de produção há um backup automático (`/usr/local/bin/portal-backup.sh`, agendado em `/etc/cron.d/portal-devocional`, todos os dias às 03:30). Ele guarda em `/opt/backups/portal-devocional/`:
+
+- o banco, copiado com a API de backup do SQLite e conferido por `integrity_check`, com 14 dias de retenção;
+- um espelho de `devocionais/` (sem `slides/`, que se regeram sozinhos), que não apaga o que for removido na origem.
+
+Para rodar na hora: `sudo /usr/local/bin/portal-backup.sh`. **Esses arquivos ficam na mesma VM**: para proteger de perda do disco, copie-os para fora, por exemplo com `rsync -avz usuario@servidor:/opt/backups/portal-devocional/ ~/Backups/trilhadefe/`. Em outra VM, copie o script e crie o cron equivalente.
 
 ### Contas, aprovação e senhas
 
