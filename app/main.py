@@ -144,8 +144,9 @@ def enviar_email_silencioso(para: str, assunto: str, texto: str, html: str) -> N
     """Para avisos que não podem travar o fluxo (ex.: admin avisado de inscrição nova)."""
     try:
         mailer.enviar(para, assunto, texto, html)
-    except RuntimeError:
-        pass
+        print(f"[email] enviado para {para}: {assunto}", flush=True)
+    except RuntimeError as e:
+        print(f"[email] FALHA para {para}: {e}", flush=True)
 
 
 def botao_email(link: str, rotulo: str) -> str:
