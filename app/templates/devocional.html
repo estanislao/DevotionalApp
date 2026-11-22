@@ -6,7 +6,10 @@
 {% set praticar_feito = 'praticar' in feitos %}
 {% set check %}<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg>{% endset %}
 <div class="main" style="padding-top:28px">
-  <a href="/" class="icon-btn" aria-label="Voltar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></a>
+  <div class="topbar" style="padding:0">
+    <a href="{{ '/colecao/' ~ devo['colecao_id'] if devo.get('colecao_nome') else '/' }}" class="icon-btn" aria-label="Voltar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></a>
+    <a href="/" class="icon-btn" aria-label="Início" title="Início"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6h-6v6H5a1 1 0 0 1-1-1z"/></svg></a>
+  </div>
   <div style="display:flex; flex-direction:column; gap:8px">
     <span style="font-size:13px; font-weight:600; color:var(--indigo)">{% if devo.get('colecao_nome') %}{{ devo['colecao_nome'] }} · {% endif %}{{ devo['data'] }}</span>
     <h1 style="margin:0; font-size:28px; line-height:1.2; font-weight:700">{{ devo['titulo'] }}</h1>
@@ -50,5 +53,8 @@
       </span>
     </a>
   </div>
+  {% if conteudo_feito and quiz_feito and praticar_feito %}
+  <a href="/" class="btn-primary" style="display:flex; align-items:center; justify-content:center; text-decoration:none">Voltar ao início</a>
+  {% endif %}
 </div>
 {% endblock %}
