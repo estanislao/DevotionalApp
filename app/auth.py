@@ -76,6 +76,17 @@ def precisa_rehash(armazenado: str | None) -> bool:
         return False
 
 
+def igualar_tempo(armazenado: str | None) -> None:
+    """Gasta as iterações que faltam a um hash antigo, para o custo de uma senha errada ser o mesmo
+    com conta (hash antigo ou novo) ou sem conta (hash fictício, sempre no padrão atual)."""
+    try:
+        faltam = _ITERACOES - int(armazenado.split("$")[1])
+    except (ValueError, TypeError, IndexError, AttributeError):
+        return
+    if faltam > 0:
+        hashlib.pbkdf2_hmac("sha256", b"igualar", b"0123456789abcdef", faltam)
+
+
 @functools.lru_cache(maxsize=1)
 def hash_falso() -> str:
     """Hash de uma senha que ninguém usa: serve para gastar o mesmo tempo quando a conta não existe."""

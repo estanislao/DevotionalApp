@@ -234,3 +234,22 @@ def test_inscricao_pendente_nao_vira_admin_no_reinicio(app_mod, client, monkeypa
         assert (linha["is_admin"], linha["status"]) == (0, "pendente")
     r = client.post("/login", data={"email": "intruso@teste.com", "senha": "outra-senha-34"})
     assert r.headers["location"].startswith("/login?erro")      # a senha do .env não vira a senha dele
+
+
+def test_custo_da_senha_errada_e_igual_com_hash_antigo_e_sem_conta(app_mod, client, monkeypatch):
+    """R-03: o total de iterações gastas não pode depender de a conta existir nem de o hash ser antigo."""
+    from app import db, auth
+    salt = "cd" * 16
+    antigo = f"pbkdf2$500${salt}${hashlib.pbkdf2_hmac('sha256', b'senha-antiga-1', bytes.fromhex(salt), 500).hex()}"
+    with db.session() as c:
+        c.execute("UPDATE members SET password_hash=? WHERE email='admin@teste.com'", (antigo,))
+    auth.hash_falso()                                            # o hash fictício é calculado uma vez e guardado
+    gastas = []
+    original = hashlib.pbkdf2_hmac
+    monkeypatch.setattr(auth.hashlib, "pbkdf2_hmac", lambda alg, pw, salt, it, *a, **k: gastas.append(it) or original(alg, pw, salt, it, *a, **k))
+    client.post("/login", data={"email": "admin@teste.com", "senha": "errada-123"})
+    com_conta = sum(gastas)
+    gastas.clear()
+    client.post("/login", data={"email": "ninguem@teste.com", "senha": "errada-123"})
+    sem_conta = sum(gastas)
+    assert com_conta == sem_conta == auth._ITERACOES

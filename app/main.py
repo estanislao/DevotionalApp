@@ -278,6 +278,8 @@ def login_submit(request: Request, email: str = Form(...), senha: str = Form(...
     # Sempre calcula um hash, mesmo sem conta: o tempo de resposta não revela quais e-mails existem.
     confere = auth.verificar_senha(senha, (row["password_hash"] if row else None) or auth.hash_falso())
     if not row or not confere:
+        if row:
+            auth.igualar_tempo(row["password_hash"])   # hash antigo: completa o custo para ficar igual ao caso sem conta
         auth.login_falhou(email, ip)
         return RedirectResponse(f"/login?erro=1&email={quote(email)}", status_code=303)
     if row["status"] != "ativo":
