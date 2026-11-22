@@ -11,7 +11,7 @@
   <div class="lista-anteriores">
     {% for d in devs %}
     <a href="/d/{{ d['slug'] }}" class="item-anterior">
-      <span><span class="titulo">{{ d['titulo'] }}</span><br><span class="meta">{{ d['data'] }} · {{ feitos[d['slug']] }} de {{ total_passos }} passos</span></span>
+      <span><span class="titulo">{{ d['titulo'] }}</span><br><span class="meta">{{ d['data'] }} · {{ feitos[d['slug']] }} de {{ total_passos }} atividades</span></span>
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5B6180" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
     </a>
     {% else %}

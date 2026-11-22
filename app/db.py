@@ -57,6 +57,14 @@ CREATE TABLE IF NOT EXISTS pin_resets (
     FOREIGN KEY(member_id) REFERENCES members(id)
 );
 
+CREATE TABLE IF NOT EXISTS shares (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    member_id INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(member_id) REFERENCES members(id)
+);
+
 CREATE TABLE IF NOT EXISTS notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     member_id INTEGER NOT NULL,

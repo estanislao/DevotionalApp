@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 {% block title %}{{ devo['titulo'] }}{% endblock %}
 {% block content %}
+{% set conteudo_feito = ('slides' in feitos) or ('ouvir' in feitos) or ('ler' in feitos) %}
+{% set quiz_feito = 'quiz' in feitos %}
+{% set praticar_feito = 'praticar' in feitos %}
+{% set check %}<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg>{% endset %}
 <div class="main" style="padding-top:28px">
   <a href="/" class="icon-btn" aria-label="Voltar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></a>
   <div style="display:flex; flex-direction:column; gap:8px">
@@ -10,27 +14,41 @@
   </div>
 
   {% if request.query_params.get('concluida') %}
-  <div class="explicacao"><span class="ok">Devocional concluída! 🙏</span><p style="margin:0; font-size:14px; color:var(--text-soft)">Os passos ficam guardados — você pode revisitar quando quiser.</p></div>
+  <div class="explicacao"><span class="ok">Devocional concluída! 🙏</span><p style="margin:0; font-size:14px; color:var(--text-soft)">Tudo fica guardado — você pode revisitar quando quiser.</p></div>
   {% endif %}
 
   <div class="trilha">
-    {% set labels = {'ouvir': ('Ouvir', 'Áudio da semana'), 'ler': ('Ler', 'Texto completo'), 'slides': ('Slides', 'Apresentação'), 'quiz': ('Quiz', 'Teste o que aprendeu'), 'praticar': ('Praticar', 'Lições para viver na semana')} %}
-    {% set proximo_definido = namespace(achou=false) %}
-    {% for step in steps %}
-      {% set concluido = step in feitos %}
-      {% set is_proximo = (not concluido) and (not proximo_definido.achou) %}
-      {% if is_proximo %}{% set proximo_definido.achou = true %}{% endif %}
-      <a href="/d/{{ devo['slug'] }}/{{ step }}" class="passo {{ 'proximo' if is_proximo else 'pendente' }}">
-        <span class="passo-icone">
-          {% if concluido %}<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg>
-          {% else %}<span style="font-weight:700">{{ loop.index }}</span>{% endif %}
-        </span>
-        <span class="passo-texto">
-          <span class="passo-titulo">{{ loop.index }} · {{ labels[step][0] }}</span>
-          <span class="passo-sub">{{ labels[step][1] }}{% if concluido %} · concluído{% elif is_proximo %} · é o próximo passo{% endif %}</span>
-        </span>
+    <div class="atividade-titulo">
+      <span class="atividade-num {{ 'feita' if conteudo_feito else '' }}">{% if conteudo_feito %}{{ check }}{% else %}1{% endif %}</span>
+      <span><strong>Conteúdo</strong><br><span class="passo-sub">{{ 'Concluído · os outros formatos continuam disponíveis' if conteudo_feito else 'Escolha um formato. Basta um para concluir.' }}</span></span>
+    </div>
+    {% set formatos = [('slides', 'Slides', 'Ver a apresentação'), ('ouvir', 'Ouvir', 'Áudio da devocional'), ('ler', 'Ler', 'Texto completo')] %}
+    <div class="formatos">
+      {% for chave, nome, sub in formatos %}
+      <a href="/d/{{ devo['slug'] }}/{{ chave }}" class="formato {{ 'feito' if chave in feitos else '' }} {{ 'proximo' if (not conteudo_feito and loop.first) else '' }}">
+        <span class="formato-nome">{{ nome }}{% if chave in feitos %} ✓{% endif %}</span>
+        <span class="formato-sub">{{ sub }}</span>
       </a>
-    {% endfor %}
+      {% endfor %}
+    </div>
+
+    {% set quiz_proximo = conteudo_feito and not quiz_feito %}
+    <a href="/d/{{ devo['slug'] }}/quiz" class="passo {{ 'proximo' if quiz_proximo else ('' if quiz_feito else 'pendente') }}">
+      <span class="passo-icone">{% if quiz_feito %}{{ check }}{% else %}<span style="font-weight:700">2</span>{% endif %}</span>
+      <span class="passo-texto">
+        <span class="passo-titulo">Quiz</span>
+        <span class="passo-sub">Teste o que aprendeu{% if quiz_feito %} · concluído{% elif quiz_proximo %} · é a próxima atividade{% endif %}</span>
+      </span>
+    </a>
+
+    {% set praticar_proximo = conteudo_feito and quiz_feito and not praticar_feito %}
+    <a href="/d/{{ devo['slug'] }}/praticar" class="passo {{ 'proximo' if praticar_proximo else ('' if praticar_feito else 'pendente') }}">
+      <span class="passo-icone">{% if praticar_feito %}{{ check }}{% else %}<span style="font-weight:700">3</span>{% endif %}</span>
+      <span class="passo-texto">
+        <span class="passo-titulo">Praticar</span>
+        <span class="passo-sub">Lições para viver na semana{% if praticar_feito %} · concluído{% elif praticar_proximo %} · é a próxima atividade{% endif %}</span>
+      </span>
+    </a>
   </div>
 </div>
 {% endblock %}

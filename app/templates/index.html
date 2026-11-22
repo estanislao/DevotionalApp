@@ -16,7 +16,7 @@
     <h1>{{ destaque['titulo'] }}</h1>
     {% if destaque.get('versiculo') %}<p class="verso">{{ destaque['versiculo'] }}</p>{% endif %}
     <div style="display:flex; flex-direction:column; gap:8px">
-      <div class="progress-row"><span>Seu progresso</span><span>{{ meu_progresso }} de {{ total_passos }} passos</span></div>
+      <div class="progress-row"><span>Seu progresso</span><span>{{ meu_progresso }} de {{ total_passos }} atividades</span></div>
       <div class="progress-track"><div class="progress-fill" style="width:{{ (meu_progresso / total_passos * 100) | round(0, 'floor') }}%"></div></div>
     </div>
     <a href="/d/{{ destaque['slug'] }}" class="btn-primary" style="display:flex; align-items:center; justify-content:center; text-decoration:none">Continuar</a>
@@ -79,6 +79,39 @@
       {% endfor %}
     </div>
   </div>
+
+  <div id="partilhas" style="display:flex; flex-direction:column; gap:12px">
+    <h2 class="section-title">Palavras da família</h2>
+    {% if partilhas %}
+    <div class="partilhas" id="partilhas-trilho">
+      {% for p in partilhas %}
+      <div class="partilha">
+        <p class="partilha-texto">“{{ p['text'] }}”</p>
+        <div class="partilha-rodape">
+          <span><strong>{{ p['autor'] }}</strong> · {{ p['created_at'][8:10] }}/{{ p['created_at'][5:7] }}</span>
+          {% if p['member_id'] == member['id'] or member['is_admin'] %}
+          <form method="post" action="/partilhas/{{ p['id'] }}/excluir" onsubmit="return confirm('Apagar esta partilha?')"><button type="submit" class="partilha-apagar">Apagar</button></form>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% if partilhas | length > 1 %}
+    <div class="partilha-pontos" id="partilha-pontos">{% for p in partilhas %}<span class="{{ 'ativo' if loop.first else '' }}"></span>{% endfor %}</div>
+    {% endif %}
+    {% else %}
+    <p style="margin:0; color:var(--text-soft); font-size:14px">Ninguém compartilhou ainda. Seja a primeira pessoa a deixar uma palavra de ânimo.</p>
+    {% endif %}
+    {% if partilha_erro %}<p class="erro" style="text-align:left; margin:0">{{ partilha_erro }}</p>{% endif %}
+    <form method="post" action="/partilhas" class="cartao">
+      <label for="partilha-texto" style="font-size:14px; font-weight:700">Compartilhe algo encorajador</label>
+      <textarea id="partilha-texto" name="texto" class="nota" style="height:88px; font-size:16px" maxlength="{{ partilha_max }}" placeholder="Um versículo, uma gratidão, uma palavra de ânimo…" required></textarea>
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:12px">
+        <span style="font-size:12px; color:var(--text-soft)">Todos da família veem. Até {{ partilha_max }} caracteres.</span>
+        <button type="submit" class="btn-primary" style="width:auto; height:44px; padding:0 20px">Compartilhar</button>
+      </div>
+    </form>
+  </div>
 </div>
 <nav class="nav-bottom">
   <span class="nav-item ativo"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6h-6v6H5a1 1 0 0 1-1-1z"/></svg>Início</span>
@@ -93,5 +126,13 @@ function mostrarAba(aba) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('ativo', t.dataset.aba === aba));
   try { history.replaceState(null, '', aba === 'ultimas' ? '/?aba=ultimas' : '/'); } catch (e) {}
 }
+// Pontinhos do carrossel de partilhas acompanham o slide visível.
+const trilho = document.getElementById('partilhas-trilho'), pontos = document.getElementById('partilha-pontos');
+if (trilho && pontos) trilho.addEventListener('scroll', () => {
+  const slides = [...trilho.children], meio = trilho.scrollLeft + trilho.clientWidth / 2;
+  let i = slides.findIndex(s => s.offsetLeft - trilho.offsetLeft + s.offsetWidth > meio);
+  if (i < 0) i = slides.length - 1;
+  [...pontos.children].forEach((p, k) => p.classList.toggle('ativo', k === i));
+}, { passive: true });
 </script>
 {% endblock %}

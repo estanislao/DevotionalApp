@@ -7,7 +7,15 @@ import markdown as md
 
 DEVOCIONAIS_DIR = Path(__file__).parent.parent / "devocionais"
 
-STEPS = ["ouvir", "ler", "slides", "quiz", "praticar"]
+STEPS = ["slides", "ouvir", "ler", "quiz", "praticar"]
+
+# Para o progresso contam 3 atividades: Conteúdo (basta UM entre slides, ouvir ou ler), Quiz e Praticar.
+CONTEUDO = ["slides", "ouvir", "ler"]
+TOTAL_ATIVIDADES = 3
+
+
+def atividades_feitas(steps) -> int:
+    return int(any(s in steps for s in CONTEUDO)) + int("quiz" in steps) + int("praticar" in steps)
 
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 

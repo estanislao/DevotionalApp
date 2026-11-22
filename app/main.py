@@ -44,6 +44,9 @@ RESET_VALIDADE = timedelta(minutes=30)
 RESET_INTERVALO = timedelta(minutes=5)   # um e-mail por conta a cada 5 min
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
 APP_NOME = "Trilha de Fé"
+PARTILHA_MAX = 280
+PARTILHAS_POR_DIA = 3
+PARTILHAS_NO_INICIO = 15
 
 
 def agora() -> str:
@@ -392,16 +395,55 @@ def home(request: Request):
         members = conn.execute("SELECT id, name FROM members WHERE status='ativo' ORDER BY id").fetchall()
         familia = []
         for m in members:
-            done = len(progress_for(conn, m["id"], destaque["slug"])) if destaque else 0
-            familia.append({"name": primeiro_nome(m["name"]), "done": done, "total": len(content.STEPS)})
-        meu_progresso = len(progress_for(conn, member["id"], destaque["slug"])) if destaque else 0
+            done = content.atividades_feitas(progress_for(conn, m["id"], destaque["slug"])) if destaque else 0
+            familia.append({"name": primeiro_nome(m["name"]), "done": done, "total": content.TOTAL_ATIVIDADES})
+        meu_progresso = content.atividades_feitas(progress_for(conn, member["id"], destaque["slug"])) if destaque else 0
+        partilhas = [dict(r, autor=primeiro_nome(r["name"])) for r in conn.execute(
+            """SELECT s.id, s.text, s.created_at, s.member_id, m.name FROM shares s
+               JOIN members m ON m.id = s.member_id ORDER BY s.id DESC LIMIT ?""", (PARTILHAS_NO_INICIO,)).fetchall()]
         pendentes = conn.execute("SELECT COUNT(*) FROM members WHERE status='pendente'").fetchone()[0] if member["is_admin"] else 0
 
     return templates.TemplateResponse(request, "index.html", {
         "member": member, "destaque": destaque, "ultimas": ultimas, "colecoes": colecoes, "avulsas": avulsas,
-        "familia": familia, "meu_progresso": meu_progresso, "total_passos": len(content.STEPS),
+        "familia": familia, "meu_progresso": meu_progresso, "total_passos": content.TOTAL_ATIVIDADES,
         "aba": request.query_params.get("aba", "colecao"), "pendentes": pendentes,
+        "partilhas": partilhas, "partilha_max": PARTILHA_MAX,
+        "partilha_erro": request.query_params.get("partilha_erro"),
     })
+
+
+# ---- Partilhas: algo encorajador que qualquer membro deixa para todos ----
+
+@app.post("/partilhas")
+def partilha_criar(request: Request, texto: str = Form("")):
+    member = auth.require_member(request)
+    texto = " ".join(texto.split())
+    if len(texto) < 3:
+        return RedirectResponse(f"/?partilha_erro={quote('Escreva algo antes de compartilhar.')}#partilhas", status_code=303)
+    if len(texto) > PARTILHA_MAX:
+        return RedirectResponse(f"/?partilha_erro={quote(f'Use até {PARTILHA_MAX} caracteres.')}#partilhas", status_code=303)
+    with db.session() as conn:
+        recentes = conn.execute(
+            "SELECT COUNT(*) FROM shares WHERE member_id=? AND created_at > ?",
+            (member["id"], (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()),
+        ).fetchone()[0]
+        if recentes >= PARTILHAS_POR_DIA:
+            return RedirectResponse(f"/?partilha_erro={quote(f'Você já compartilhou {PARTILHAS_POR_DIA} vezes hoje. Volte amanhã.')}#partilhas", status_code=303)
+        conn.execute("INSERT INTO shares (member_id, text, created_at) VALUES (?,?,?)", (member["id"], texto, agora()))
+    return RedirectResponse("/#partilhas", status_code=303)
+
+
+@app.post("/partilhas/{share_id}/excluir")
+def partilha_excluir(request: Request, share_id: int):
+    member = auth.require_member(request)
+    with db.session() as conn:
+        row = conn.execute("SELECT member_id FROM shares WHERE id=?", (share_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Partilha não encontrada.")
+        if row["member_id"] != member["id"] and not member["is_admin"]:
+            raise HTTPException(403, "Só quem escreveu ou o administrador pode apagar.")
+        conn.execute("DELETE FROM shares WHERE id=?", (share_id,))
+    return RedirectResponse("/#partilhas", status_code=303)
 
 
 @app.get("/colecao/{colecao_id}", response_class=HTMLResponse)
@@ -414,9 +456,9 @@ def ver_colecao(request: Request, colecao_id: int):
         devs = content.list_by_collection(colecao_id)
         feitos = {}
         for d in devs:
-            feitos[d["slug"]] = len(progress_for(conn, member["id"], d["slug"]))
+            feitos[d["slug"]] = content.atividades_feitas(progress_for(conn, member["id"], d["slug"]))
     return templates.TemplateResponse(request, "colecao.html", {
-        "colecao": dict(col), "devs": devs, "feitos": feitos, "total_passos": len(content.STEPS),
+        "colecao": dict(col), "devs": devs, "feitos": feitos, "total_passos": content.TOTAL_ATIVIDADES,
     })
 
 
@@ -448,7 +490,7 @@ def concluir_ouvir(request: Request, slug: str):
     devo_ou_404(slug)
     with db.session() as conn:
         mark_step(conn, member["id"], slug, "ouvir")
-    return RedirectResponse(f"/d/{slug}/ler", status_code=303)
+    return RedirectResponse(f"/d/{slug}/quiz", status_code=303)
 
 
 @app.get("/d/{slug}/ler", response_class=HTMLResponse)
@@ -741,7 +783,7 @@ def admin_membro_excluir(request: Request, member_id: int):
         return _volta_membros("erro", "Você não pode excluir a própria conta.")
     with db.session() as conn:
         row = _membro_ou_404(conn, member_id)
-        for tabela in ("progress", "quiz_answers", "notes", "pin_resets"):
+        for tabela in ("progress", "quiz_answers", "notes", "pin_resets", "shares"):
             conn.execute(f"DELETE FROM {tabela} WHERE member_id=?", (member_id,))
         conn.execute("DELETE FROM members WHERE id=?", (member_id,))
     return _volta_membros("ok", f"{row['name']} excluído.")
