@@ -13,3 +13,6 @@ entrada/
 # conteúdo real das devocionais (áudio, PDF, texto) fica só no servidor
 devocionais/*
 !devocionais/.gitkeep
+
+# documentos internos de auditoria (têm detalhes de infraestrutura e achados de segurança)
+auditoria/
