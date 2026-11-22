@@ -1,6 +1,7 @@
 #!/bin/bash
 # Restaura o banco do Trilha de Fé a partir de um backup .db.gz.
-#   Uso:      portal-restore.sh /opt/backups/portal-devocional/portal-AAAA-MM-DD-HHMM.db.gz
+#   Uso:      portal-restore.sh /opt/backups/portal-devocional/portal-AAAA-MM-DD-HHMM.db.gz.enc   (ou .db.gz)
+#   A chave de cifra é lida de CHAVE (padrão /root/.portal-backup.key); sem ela não há como abrir um .enc.
 #   Ensaio:   ENSAIO=1 VOLUME=um_volume_de_teste portal-restore.sh ARQUIVO.db.gz   (não mexe no app em produção)
 #
 # O arquivo é gravado COMO O USUÁRIO DO APP (uid 1000). Gravar como root deixaria o banco somente leitura
@@ -12,10 +13,17 @@ APP=${APP:-/opt/portal-devocional}
 VOLUME=${VOLUME:-portal-devocional_db_data}
 IMAGEM=${IMAGEM:-portal-devocional-app}
 ENSAIO=${ENSAIO:-0}
+CHAVE=${CHAVE:-/root/.portal-backup.key}
 
 [ -f "$ARQ" ] || { echo "arquivo não encontrado: $ARQ" >&2; exit 1; }
 TMP=$(mktemp); trap 'rm -f "$TMP"' EXIT
-gunzip -c "$ARQ" > "$TMP"
+case "$ARQ" in
+  *.enc)
+    [ -s "$CHAVE" ] || { echo "backup cifrado, mas a chave não está em $CHAVE (defina CHAVE=/caminho/da/chave)" >&2; exit 1; }
+    openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass "file:$CHAVE" -in "$ARQ" 2>/dev/null | gunzip -c > "$TMP" \
+      || { echo "não consegui abrir o backup cifrado: a chave está errada ou o arquivo foi alterado. Nada foi restaurado." >&2; exit 1; } ;;
+  *) gunzip -c "$ARQ" > "$TMP" ;;
+esac
 
 # 1) Confere o backup ANTES de tocar em qualquer coisa.
 python3 - "$TMP" <<'PY' || { echo "backup RECUSADO: não restaurei nada." >&2; exit 1; }

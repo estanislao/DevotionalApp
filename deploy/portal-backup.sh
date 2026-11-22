@@ -2,16 +2,20 @@
 # Backup do Trilha de Fé: banco (consistente e conferido, com retenção) e espelho das devocionais.
 # Instalado em /usr/local/bin pelo deploy/instalar-na-vm.sh e executado todo dia pelo cron.d.
 # Falha com código diferente de zero e uma linha "FALHA" no log se qualquer conferência não passar.
+# O banco é CIFRADO (AES-256, PBKDF2) com a chave em /root/.portal-backup.key: o backup tem hashes de senha e as
+# anotações dos membros, e só a versão cifrada deve sair da VM. Sem a chave, o script avisa e não cifra.
 set -euo pipefail
 umask 077
 
 APP=${APP:-/opt/portal-devocional}
 DEST=${DEST:-/opt/backups/portal-devocional}
 RETENCAO_DIAS=${RETENCAO_DIAS:-14}
+CHAVE=${CHAVE:-/root/.portal-backup.key}
+CIFRA=(openssl enc -aes-256-cbc -pbkdf2 -iter 600000)
 STAMP=$(date +%F-%H%M)
 ARQ="$DEST/portal-$STAMP.db"
 
-falhou() { echo "$(date -Is) FALHA no backup: $1" >&2; rm -f "$ARQ" "$ARQ.gz"; exit 1; }
+falhou() { echo "$(date -Is) FALHA no backup: $1" >&2; rm -f "$ARQ" "$ARQ.gz" "$ARQ.gz.enc"; exit 1; }
 trap 'falhou "erro inesperado na linha $LINENO"' ERR
 
 mkdir -p "$DEST/devocionais-espelho"
@@ -50,11 +54,32 @@ assert membros == int(sys.argv[2]), f"membros no backup ({membros}) diferem do b
 PY
 gzip -f "$ARQ"
 
+# 2b) Cifra e prova que decifra de volta, byte a byte, ANTES de apagar a versão sem cifra.
+if [ -s "$CHAVE" ]; then
+  "${CIFRA[@]}" -salt -pass "file:$CHAVE" -in "$ARQ.gz" -out "$ARQ.gz.enc"
+  ORIGINAL=$(sha256sum < "$ARQ.gz" | cut -d' ' -f1)
+  VOLTA=$("${CIFRA[@]}" -d -pass "file:$CHAVE" -in "$ARQ.gz.enc" | sha256sum | cut -d' ' -f1)
+  [ "$ORIGINAL" = "$VOLTA" ] || falhou "o backup cifrado não decifra de volta igual ao original"
+  rm -f "$ARQ.gz"
+  FINAL="$ARQ.gz.enc"; ESTADO="cifrado"
+else
+  FINAL="$ARQ.gz"; ESTADO="SEM CIFRA (falta $CHAVE)"
+  echo "$(date -Is) AVISO: sem chave de cifra; este backup ficou legível por quem acessar a VM." >&2
+fi
+
+# Cifra também backups antigos que ainda estejam em texto simples (de antes da chave existir).
+if [ -s "$CHAVE" ]; then
+  for velho in "$DEST"/portal-*.db.gz; do
+    [ -e "$velho" ] || continue
+    "${CIFRA[@]}" -salt -pass "file:$CHAVE" -in "$velho" -out "$velho.enc" && rm -f "$velho"
+  done
+fi
+
 # 3) Espelho das devocionais, SEM apagar o que for removido na origem (protege contra exclusão acidental).
 #    Os slides em imagem são regerados sozinhos a partir do PDF, então ficam de fora.
 rsync -a --exclude slides --exclude '.publicando-*' "$APP/devocionais/" "$DEST/devocionais-espelho/"
 
 # 4) Retenção do banco.
-find "$DEST" -maxdepth 1 -name 'portal-*.db.gz' -mtime +"$RETENCAO_DIAS" -delete
+find "$DEST" -maxdepth 1 \( -name 'portal-*.db.gz' -o -name 'portal-*.db.gz.enc' \) -mtime +"$RETENCAO_DIAS" -delete
 
-echo "$(date -Is) backup ok: portal-$STAMP.db.gz ($(du -h "$ARQ.gz" | cut -f1)), $MEMBROS_VIVO membro(s) conferidos, espelho de $(du -sh "$DEST/devocionais-espelho" | cut -f1)"
+echo "$(date -Is) backup ok: $(basename "$FINAL") ($(du -h "$FINAL" | cut -f1), $ESTADO), $MEMBROS_VIVO membro(s) conferidos, espelho de $(du -sh "$DEST/devocionais-espelho" | cut -f1)"
