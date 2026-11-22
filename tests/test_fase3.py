@@ -98,3 +98,45 @@ def test_cache_do_texto_acompanha_a_edicao_do_arquivo(app_mod):
     os.utime(arq, ns=(depois, depois))
     assert "<strong>dois</strong>" in content.get_texto_html(SLUG)
     assert content.get_texto_html("../etc") == "" and content.get_texto_html("nao-existe") == ""
+
+
+# ---------- A-11: fontes servidas pelo próprio app ----------
+FONTES = ["plus-jakarta-sans-latin.woff2", "newsreader-latin.woff2", "newsreader-italic-latin.woff2"]
+
+
+def test_nenhuma_tela_carrega_recurso_de_fora():
+    for arq in sorted((RAIZ / "app" / "templates").glob("*.html")):
+        texto = arq.read_text(encoding="utf-8")
+        externos = re.findall(r"""(?:src|href)=["'](https?://[^"']+)""", texto)
+        assert not externos, f"{arq.name} carrega recurso externo: {externos}"
+    css = (RAIZ / "app" / "static" / "css" / "style.css").read_text(encoding="utf-8")
+    assert "googleapis" not in css and "gstatic" not in css and "@import" not in css
+
+
+def test_csp_nao_aceita_nenhuma_origem_externa(client):
+    csp = client.get("/login").headers["content-security-policy"]
+    assert "http://" not in csp and "https://" not in csp, csp
+    assert "font-src 'self'" in csp
+
+
+@pytest.mark.parametrize("arquivo", FONTES)
+def test_fonte_e_servida_pelo_app_e_e_woff2_valido(client, arquivo):
+    r = client.get(f"/static/fonts/{arquivo}")
+    assert r.status_code == 200 and "font" in r.headers["content-type"]
+    assert r.content[:4] == b"wOF2" and len(r.content) > 10_000
+
+
+def test_css_declara_as_tres_familias_apontando_para_o_proprio_app(client):
+    css = client.get("/static/css/style.css").text
+    for arquivo in FONTES:
+        assert f"/static/fonts/{arquivo}" in css
+    assert css.count("@font-face") == 3 and "font-display: swap" in css
+
+
+def test_licenca_das_fontes_acompanha_os_arquivos(client):
+    texto = client.get("/static/fonts/LICENSE.txt").text
+    assert "SIL Open Font License" in texto and all(a in texto for a in FONTES)
+    for arquivo in FONTES:                                       # o registro de SHA-256 confere com o arquivo servido
+        import hashlib
+        sha = hashlib.sha256(client.get(f"/static/fonts/{arquivo}").content).hexdigest()
+        assert sha in texto, arquivo

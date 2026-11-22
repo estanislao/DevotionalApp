@@ -1,8 +1,8 @@
 // Service worker mínimo: deixa o app instalável e abrir rápido.
 // Estratégia "rede primeiro": busca sempre a versão atual e só usa o cache se estiver sem internet.
 // (Antes era "cache primeiro", e quem já tinha instalado o app ficava preso num CSS antigo.)
-const CACHE = 'trilha-de-fe-v4';
-const SHELL = ['/static/css/style.css', '/static/app.js', '/static/logo.svg', '/static/manifest.json', '/static/icons/icon-192.png', '/static/icons/icon-512.png'];
+const CACHE = 'trilha-de-fe-v5';
+const SHELL = ['/static/css/style.css', '/static/app.js', '/static/fonts/plus-jakarta-sans-latin.woff2', '/static/fonts/newsreader-latin.woff2', '/static/fonts/newsreader-italic-latin.woff2', '/static/logo.svg', '/static/manifest.json', '/static/icons/icon-192.png', '/static/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));

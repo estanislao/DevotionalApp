@@ -68,7 +68,7 @@ ESQUECI_POR_IP = 10            # pedidos de recuperação por hora
 # Cabeçalhos de segurança em todas as respostas. Não há JavaScript embutido nas páginas (tudo está em
 # /static/app.js), então script-src é só 'self'. Estilos inline (atributo style) ainda são permitidos.
 CSP = ("default-src 'self'; script-src 'self'; "
-       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; "
+       "style-src 'self' 'unsafe-inline'; font-src 'self'; "
        "img-src 'self' data:; media-src 'self'; frame-src 'self'; frame-ancestors 'self'; "
        "base-uri 'self'; form-action 'self'; object-src 'none'")
 CABECALHOS = {
