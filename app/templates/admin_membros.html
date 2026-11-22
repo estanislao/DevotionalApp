@@ -14,7 +14,7 @@
   <div class="cartao">
     <span style="font-weight:700; font-size:15px">Link de convite</span>
     {% if convite_link %}
-    <input readonly value="{{ convite_link }}" onclick="this.select()" aria-label="Link de convite" style="height:44px; border:1px solid #C9CDE6; border-radius:12px; padding:0 12px; font-size:13px; background:#fff; color:var(--text); width:100%">
+    <input readonly value="{{ convite_link }}" data-selecionar aria-label="Link de convite" style="height:44px; border:1px solid #C9CDE6; border-radius:12px; padding:0 12px; font-size:13px; background:#fff; color:var(--text); width:100%">
     <span style="font-size:13px; color:var(--text-soft); line-height:1.45">Quem abrir este link pode pedir inscrição. Você ainda aprova cada pessoa abaixo. Para trocar o código, edite <code>CADASTRO_CODIGO</code> no servidor.</span>
     {% else %}
     <span style="font-size:13px; color:var(--text-soft); line-height:1.45"><strong>Cadastro fechado.</strong> Para abrir convites, defina <code>CADASTRO_CODIGO</code> no <code>.env</code> do servidor.</span>
@@ -33,7 +33,7 @@
     </div>
     <div class="acoes">
       <form method="post" action="/admin/membros/{{ m['id'] }}/aprovar"><button type="submit" class="btn-primary" style="height:44px">Aprovar</button></form>
-      <form method="post" action="/admin/membros/{{ m['id'] }}/excluir" data-msg="Recusar e apagar a inscrição de {{ m['name'] }}?" onsubmit="return confirm(this.dataset.msg)"><button type="submit" class="btn-danger">Recusar</button></form>
+      <form method="post" action="/admin/membros/{{ m['id'] }}/excluir" data-confirm="Recusar e apagar a inscrição de {{ m['name'] }}?"><button type="submit" class="btn-danger">Recusar</button></form>
     </div>
   </div>
   {% else %}
@@ -55,7 +55,7 @@
       <button type="submit" class="btn-secondary">Redefinir</button>
     </form>
     {% if m['id'] != me['id'] %}
-    <form method="post" action="/admin/membros/{{ m['id'] }}/excluir" data-msg="Excluir {{ m['name'] }} e todo o progresso dessa pessoa? Não dá para desfazer." onsubmit="return confirm(this.dataset.msg)">
+    <form method="post" action="/admin/membros/{{ m['id'] }}/excluir" data-confirm="Excluir {{ m['name'] }} e todo o progresso dessa pessoa? Não dá para desfazer.">
       <button type="submit" class="btn-danger" style="width:100%">Excluir membro</button>
     </form>
     {% endif %}

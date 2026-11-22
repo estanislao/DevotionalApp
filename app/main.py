@@ -63,9 +63,9 @@ CADASTRO_AVISO_MAX = 20        # só avisa o admin por e-mail enquanto houver at
 LOGIN_FALHAS_POR_IP = 20       # senhas erradas por 15 minutos
 ESQUECI_POR_IP = 10            # pedidos de recuperação por hora
 
-# Cabeçalhos de segurança em todas as respostas. 'unsafe-inline' é necessário porque as telas
-# usam scripts e estilos inline; o restante da política continua restringindo origens.
-CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; "
+# Cabeçalhos de segurança em todas as respostas. Não há JavaScript embutido nas páginas (tudo está em
+# /static/app.js), então script-src é só 'self'. Estilos inline (atributo style) ainda são permitidos.
+CSP = ("default-src 'self'; script-src 'self'; "
        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; "
        "img-src 'self' data:; media-src 'self'; frame-src 'self'; frame-ancestors 'self'; "
        "base-uri 'self'; form-action 'self'; object-src 'none'")
@@ -886,8 +886,6 @@ async def admin_publicar(
     }
     (folder / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    content.get_texto_html.cache_clear()
-    content.get_licoes_html.cache_clear()
     await run_in_threadpool(content.gerar_slides, slug, pdf_name)   # se falhar, a tela usa o PDF embutido
 
     return RedirectResponse("/admin?publicado=1", status_code=303)

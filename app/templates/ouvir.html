@@ -15,7 +15,7 @@
     <span style="font-size:14px; color:var(--text-soft)">Áudio da semana{% if devo.get('versiculo') %} · {{ devo['versiculo'] }}{% endif %}</span>
   </div>
   {% if tem_audio %}
-  <audio class="player-nativo" controls preload="none" src="/d/{{ devo['slug'] }}/midia/{{ devo.get('audio', 'audio.m4a') }}"></audio>
+  <audio class="player-nativo" data-ao-terminar="#form-ouvir" controls preload="none" src="/d/{{ devo['slug'] }}/midia/{{ devo.get('audio', 'audio.m4a') }}"></audio>
   {% else %}
   <p style="text-align:center; color:var(--text-soft); font-size:14px">Áudio ainda não publicado para esta devocional.</p>
   {% endif %}
@@ -24,9 +24,4 @@
   </form>
   <p class="outros-formatos">Prefere outro formato? <a href="/d/{{ devo['slug'] }}/slides">Ver slides</a> · <a href="/d/{{ devo['slug'] }}/ler">Ler</a></p>
 </div>
-<script>
-// Quando o áudio termina, o passo é marcado sozinho e segue para o Quiz. O botão continua como reserva.
-const audio = document.querySelector('audio.player-nativo');
-if (audio) audio.addEventListener('ended', () => document.getElementById('form-ouvir').submit());
-</script>
 {% endblock %}

@@ -6,6 +6,7 @@ import threading
 from pathlib import Path
 from functools import lru_cache
 import markdown as md
+import nh3
 
 DEVOCIONAIS_DIR = Path(__file__).parent.parent / "devocionais"
 
@@ -71,20 +72,37 @@ def get_devotional(slug: str) -> dict | None:
     return meta
 
 
-@lru_cache(maxsize=64)
+# O texto e as lições vêm de arquivos Markdown (às vezes copiados de ferramentas externas) e o Markdown aceita
+# HTML cru. Por isso a saída passa por uma lista de permissões: só ficam tags de texto; script, onerror, iframe,
+# style e links javascript: são removidos.
+TAGS_PERMITIDAS = {"p", "br", "hr", "strong", "em", "b", "i", "u", "s", "blockquote", "ul", "ol", "li",
+                   "h1", "h2", "h3", "h4", "h5", "h6", "a", "code", "pre"}
+
+
+def limpar_html(html: str) -> str:
+    return nh3.clean(html, tags=TAGS_PERMITIDAS, attributes={"a": {"href", "title"}},
+                     url_schemes={"http", "https", "mailto"}, link_rel="noopener noreferrer")
+
+
+@lru_cache(maxsize=256)
+def _renderizar(caminho: str, mtime_ns: int) -> str:
+    """mtime_ns faz parte da chave: editar o arquivo no servidor invalida o cache sozinho."""
+    return limpar_html(md.markdown(Path(caminho).read_text(encoding="utf-8")))
+
+
+def _markdown_da_devocional(slug: str, arquivo: str) -> str:
+    path = DEVOCIONAIS_DIR / slug / arquivo
+    if not slug_valido(slug) or not path.is_file():
+        return ""
+    return _renderizar(str(path), path.stat().st_mtime_ns)
+
+
 def get_texto_html(slug: str) -> str:
-    path = DEVOCIONAIS_DIR / slug / "texto.md"
-    if not path.exists():
-        return ""
-    return md.markdown(path.read_text(encoding="utf-8"))
+    return _markdown_da_devocional(slug, "texto.md")
 
 
-@lru_cache(maxsize=64)
 def get_licoes_html(slug: str) -> str:
-    path = DEVOCIONAIS_DIR / slug / "licoes.md"
-    if not path.exists():
-        return ""
-    return md.markdown(path.read_text(encoding="utf-8"))
+    return _markdown_da_devocional(slug, "licoes.md")
 
 
 def validar_quiz(raw: bytes) -> list[dict]:

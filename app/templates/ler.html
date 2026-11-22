@@ -5,7 +5,7 @@
 <div class="topbar">
   <a href="/d/{{ devo['slug'] }}" class="icon-btn" aria-label="Voltar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></a>
   <span style="font-size:13px; font-weight:600; color:var(--ink-paper-soft)">Conteúdo · Ler</span>
-  <button class="icon-btn" aria-label="Aumentar fonte" onclick="mudarFonte()" style="font-size:15px; font-weight:700">Aa</button>
+  <button class="icon-btn" aria-label="Aumentar fonte" data-acao="fonte" style="font-size:15px; font-weight:700">Aa</button>
 </div>
 <div style="flex:1; overflow:auto; padding:20px 28px 0; display:flex; flex-direction:column; gap:18px">
   {% if devo.get('versiculo') %}<span class="texto-ref">{{ devo['versiculo'] }}</span>{% endif %}
@@ -18,11 +18,4 @@
   <a href="/d/{{ devo['slug'] }}/quiz" class="btn-primary" style="color:#2A2518; display:flex; align-items:center; justify-content:center; text-decoration:none">Ir para o Quiz</a>
   <p class="outros-formatos">Prefere outro formato? <a href="/d/{{ devo['slug'] }}/slides">Ver slides</a> · <a href="/d/{{ devo['slug'] }}/ouvir">Ouvir</a></p>
 </div>
-<script>
-function mudarFonte() {
-  const el = document.getElementById('texto');
-  const atual = parseInt(getComputedStyle(el).fontSize);
-  el.style.fontSize = (atual >= 22 ? 18 : atual + 2) + 'px';
-}
-</script>
 {% endblock %}

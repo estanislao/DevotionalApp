@@ -51,8 +51,8 @@
 
   <div style="display:flex; flex-direction:column; gap:12px">
     <div class="tabs" role="tablist">
-      <button type="button" class="tab {{ 'ativo' if aba != 'ultimas' else '' }}" data-aba="colecao" onclick="mostrarAba('colecao')">Coleções</button>
-      <button type="button" class="tab {{ 'ativo' if aba == 'ultimas' else '' }}" data-aba="ultimas" onclick="mostrarAba('ultimas')">Últimas</button>
+      <button type="button" class="tab {{ 'ativo' if aba != 'ultimas' else '' }}" data-acao="aba" data-aba="colecao">Coleções</button>
+      <button type="button" class="tab {{ 'ativo' if aba == 'ultimas' else '' }}" data-acao="aba" data-aba="ultimas">Últimas</button>
     </div>
 
     <div id="aba-colecao" class="lista-anteriores" {% if aba == 'ultimas' %}style="display:none"{% endif %}>
@@ -95,7 +95,7 @@
         <div class="partilha-rodape">
           <span><strong>{{ p['autor'] }}</strong> · {{ p['created_at'][8:10] }}/{{ p['created_at'][5:7] }}</span>
           {% if p['member_id'] == member['id'] or member['is_admin'] %}
-          <form method="post" action="/partilhas/{{ p['id'] }}/excluir" onsubmit="return confirm('Apagar esta partilha?')"><button type="submit" class="partilha-apagar">Apagar</button></form>
+          <form method="post" action="/partilhas/{{ p['id'] }}/excluir" data-confirm="Apagar esta partilha?"><button type="submit" class="partilha-apagar">Apagar</button></form>
           {% endif %}
         </div>
       </div>
@@ -124,20 +124,4 @@
   <a href="/admin" class="nav-item" style="position:relative"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.6V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.6 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.6 1z"/></svg>Admin{% if pendentes %}<span class="badge-num">{{ pendentes }}</span>{% endif %}</a>
   {% endif %}
 </nav>
-<script>
-function mostrarAba(aba) {
-  document.getElementById('aba-colecao').style.display = aba === 'colecao' ? '' : 'none';
-  document.getElementById('aba-ultimas').style.display = aba === 'ultimas' ? '' : 'none';
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('ativo', t.dataset.aba === aba));
-  try { history.replaceState(null, '', aba === 'ultimas' ? '/?aba=ultimas' : '/'); } catch (e) {}
-}
-// Pontinhos do carrossel de partilhas acompanham o slide visível.
-const trilho = document.getElementById('partilhas-trilho'), pontos = document.getElementById('partilha-pontos');
-if (trilho && pontos) trilho.addEventListener('scroll', () => {
-  const slides = [...trilho.children], meio = trilho.scrollLeft + trilho.clientWidth / 2;
-  let i = slides.findIndex(s => s.offsetLeft - trilho.offsetLeft + s.offsetWidth > meio);
-  if (i < 0) i = slides.length - 1;
-  [...pontos.children].forEach((p, k) => p.classList.toggle('ativo', k === i));
-}, { passive: true });
-</script>
 {% endblock %}

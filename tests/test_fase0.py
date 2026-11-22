@@ -13,8 +13,7 @@ def test_r01_nome_com_apostrofo_nao_vira_javascript(client):
     html = client.get("/admin/membros").text
     assert nome not in html                                    # nunca aparece cru
     assert "confirm('Recusar" not in html and "confirm('Excluir" not in html
-    assert 'onsubmit="return confirm(this.dataset.msg)"' in html
-    assert 'data-msg="Recusar e apagar a inscrição de x&#39;);alert(1);(&#39;?"' in html
+    assert 'data-confirm="Recusar e apagar a inscrição de x&#39;);alert(1);(&#39;?"' in html and 'onsubmit=' not in html
 
 
 def test_r01_nome_de_colecao_tambem_fica_fora_do_javascript(client):
@@ -22,7 +21,7 @@ def test_r01_nome_de_colecao_tambem_fica_fora_do_javascript(client):
     client.post("/admin/colecoes", data={"nome": "c');alert(1);('", "descricao": ""})
     html = client.get("/admin/colecoes").text
     assert "confirm('Excluir a cole" not in html and "c');alert(1);('" not in html
-    assert 'onclick="return confirm(this.dataset.msg)"' in html
+    assert 'data-confirm="Excluir a coleção c&#39;);alert(1);(&#39;?"' in html and 'onclick=' not in html
 
 
 def test_n02_email_com_html_e_recusado(client):

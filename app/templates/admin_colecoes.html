@@ -26,7 +26,7 @@
     <span style="font-size:13px; color:var(--text-soft)">{{ c['total'] }} devocion{{ 'al' if c['total'] == 1 else 'ais' }} · <a href="/colecao/{{ c['id'] }}">ver como membro</a></span>
     <div class="acoes">
       <button type="submit" class="btn-secondary" style="flex:1">Salvar</button>
-      <button type="submit" class="btn-danger" formaction="/admin/colecoes/{{ c['id'] }}/excluir" {% if c['total'] %}disabled title="Tem devocionais"{% else %}data-msg="Excluir a coleção {{ c['name'] }}?" onclick="return confirm(this.dataset.msg)"{% endif %}>Excluir</button>
+      <button type="submit" class="btn-danger" formaction="/admin/colecoes/{{ c['id'] }}/excluir" {% if c['total'] %}disabled title="Tem devocionais"{% else %}data-confirm="Excluir a coleção {{ c['name'] }}?"{% endif %}>Excluir</button>
     </div>
   </form>
   {% else %}

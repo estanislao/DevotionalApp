@@ -6,3 +6,4 @@ itsdangerous>=2.2
 markdown>=3.7
 pypdfium2>=4.30
 pillow>=10.0
+nh3>=0.2.18

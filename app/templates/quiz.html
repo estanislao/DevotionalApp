@@ -44,7 +44,7 @@
       <p style="margin:0; font-size:14px; line-height:1.5; color:var(--text-soft)">{{ p.get('explicacao', '') }}</p>
     </div>
     {% if not loop.last %}
-    <a href="#{{ perguntas[loop.index0 + 1]['id'] }}" class="btn-primary" style="display:flex; align-items:center; justify-content:center; text-decoration:none" onclick="irPara('{{ perguntas[loop.index0 + 1]['id'] }}')">Próxima pergunta</a>
+    <a href="#{{ perguntas[loop.index0 + 1]['id'] }}" class="btn-primary" style="display:flex; align-items:center; justify-content:center; text-decoration:none" data-acao="quiz-ir" data-id="{{ perguntas[loop.index0 + 1]['id'] }}">Próxima pergunta</a>
     {% else %}
     <a href="/d/{{ devo['slug'] }}/praticar" class="btn-primary" style="display:flex; align-items:center; justify-content:center; text-decoration:none">Ir para Praticar</a>
     {% endif %}
@@ -52,15 +52,4 @@
   </div>
   {% endfor %}
 </div>
-<script>
-function irPara(id) {
-  document.querySelectorAll('.main > div[id]').forEach(d => d.style.display = 'none');
-  const alvo = document.getElementById(id);
-  if (alvo) alvo.style.display = 'flex';
-}
-if (location.hash) {
-  const id = location.hash.replace('#', '').replace('-resposta', '');
-  irPara(id);
-}
-</script>
 {% endblock %}
