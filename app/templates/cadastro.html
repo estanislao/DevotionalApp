@@ -12,6 +12,7 @@
     <div class="campo"><label for="email">E-mail</label><input id="email" name="email" type="email" value="{{ email }}" required autocomplete="email" inputmode="email" autocapitalize="none"></div>
     <div class="campo"><label for="senha">Senha (mínimo {{ senha_min }} caracteres)</label><input id="senha" name="senha" type="password" required minlength="{{ senha_min }}" autocomplete="new-password"></div>
     <div class="campo"><label for="senha2">Repita a senha</label><input id="senha2" name="senha2" type="password" required minlength="{{ senha_min }}" autocomplete="new-password"></div>
+    <div class="isca" aria-hidden="true"><label>Não preencha este campo<input name="site" type="text" tabindex="-1" autocomplete="off"></label></div>
     <button type="submit" class="btn-primary" style="margin-top:6px">Enviar inscrição</button>
   </form>
   <a href="/login" style="text-align:center; font-size:14px; font-weight:600">Já tenho conta</a>

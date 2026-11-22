@@ -79,6 +79,36 @@ def registrar_acerto(chave: str) -> None:
         _tentativas.pop(chave, None)
 
 
+# ---------- Limite por origem (IP), janela deslizante em memória ----------
+
+_eventos: dict[str, list[float]] = {}
+
+
+def eventos_recentes(chave: str, janela_s: int) -> int:
+    agora = time.time()
+    with _lock:
+        recentes = [t for t in _eventos.get(chave, []) if agora - t < janela_s]
+        _eventos[chave] = recentes
+        return len(recentes)
+
+
+def registrar_evento(chave: str) -> None:
+    with _lock:
+        _eventos.setdefault(chave, []).append(time.time())
+        if len(_eventos) > 5000:   # evita crescer sem fim com muitos IPs diferentes
+            limite = time.time() - 24 * 3600
+            for k in [k for k, v in _eventos.items() if not v or v[-1] < limite]:
+                _eventos.pop(k, None)
+
+
+def permitir(chave: str, maximo: int, janela_s: int) -> bool:
+    """Conta uma ocorrência e diz se ainda está dentro do limite."""
+    if eventos_recentes(chave, janela_s) >= maximo:
+        return False
+    registrar_evento(chave)
+    return True
+
+
 # ---------- Sessão ----------
 
 def make_session_cookie(member_id: int) -> str:

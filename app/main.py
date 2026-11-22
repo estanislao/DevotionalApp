@@ -48,6 +48,26 @@ RESET_INTERVALO = timedelta(minutes=5)   # um e-mail por conta a cada 5 min
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
 APP_NOME = "Trilha de Fé"
 PARTILHA_MAX = 280
+# Limites contra abuso (por IP; contadores em memória, zeram ao reiniciar)
+CADASTRO_POR_IP = 5            # inscrições por hora
+CADASTRO_PENDENTES_MAX = 100   # acima disso, inscrições ficam fechadas até o admin limpar a fila
+CADASTRO_AVISO_MAX = 20        # só avisa o admin por e-mail enquanto houver até N pendentes
+LOGIN_FALHAS_POR_IP = 20       # senhas erradas por 15 minutos
+ESQUECI_POR_IP = 10            # pedidos de recuperação por hora
+
+# Cabeçalhos de segurança em todas as respostas. 'unsafe-inline' é necessário porque as telas
+# usam scripts e estilos inline; o restante da política continua restringindo origens.
+CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; "
+       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; "
+       "img-src 'self' data:; media-src 'self'; frame-src 'self'; frame-ancestors 'self'; "
+       "base-uri 'self'; form-action 'self'; object-src 'none'")
+CABECALHOS = {
+    "Content-Security-Policy": CSP,
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",   # SAMEORIGIN e não DENY: o PDF de reserva usa iframe da mesma origem
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
+}
 PARTILHAS_POR_DIA = 3
 PARTILHAS_NO_INICIO = 15
 
@@ -60,8 +80,8 @@ def ler_admin_env() -> dict | None:
     email = os.environ.get("ADMIN_EMAIL", "").strip().lower()
     senha = os.environ.get("ADMIN_PASSWORD", "")
     nome = os.environ.get("ADMIN_NAME", "Administrador").strip() or "Administrador"
-    if not email and not senha:
-        return None
+    if not senha:
+        return None   # sem ADMIN_PASSWORD o admin não é criado (nem alterado): normal depois do primeiro boot
     if not EMAIL_RE.match(email) or len(senha) < auth.SENHA_MIN:
         raise RuntimeError("ADMIN_EMAIL precisa ser um e-mail válido e ADMIN_PASSWORD ter pelo menos "
                            f"{auth.SENHA_MIN} caracteres (veja .env.example).")
@@ -78,6 +98,20 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title=APP_NOME, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
+
+
+@app.middleware("http")
+async def cabecalhos_de_seguranca(request: Request, call_next):
+    resp = await call_next(request)
+    for nome, valor in CABECALHOS.items():
+        resp.headers.setdefault(nome, valor)
+    if auth.COOKIE_SECURE:   # HTTPS em produção; no teste local (http) o HSTS não se aplica
+        resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return resp
+
+
+def ip_cliente(request: Request) -> str:
+    return request.client.host if request.client else "desconhecido"
 
 
 # ---------- Páginas de erro amigáveis (em vez de JSON) ----------
@@ -198,14 +232,16 @@ def sessao_cookie(resp, member_id: int):
 
 
 @app.post("/login")
-def login_submit(email: str = Form(...), senha: str = Form(...)):
+def login_submit(request: Request, email: str = Form(...), senha: str = Form(...)):
     email = email.strip().lower()
-    if auth.bloqueado_por(email) > 0:
+    chave_ip = f"login:{ip_cliente(request)}"
+    if auth.bloqueado_por(email) > 0 or auth.eventos_recentes(chave_ip, 900) >= LOGIN_FALHAS_POR_IP:
         return RedirectResponse("/login?erro=bloqueado", status_code=303)
     with db.session() as conn:
         row = conn.execute("SELECT * FROM members WHERE email=?", (email,)).fetchone()
     if not row or not auth.verificar_senha(senha, row["password_hash"]):
         auth.registrar_erro(email)
+        auth.registrar_evento(chave_ip)
         return RedirectResponse(f"/login?erro=1&email={quote(email)}", status_code=303)
     if row["status"] != "ativo":
         return RedirectResponse("/login?erro=pendente", status_code=303)
@@ -233,8 +269,11 @@ def cadastro_form(request: Request):
 
 
 @app.post("/cadastro")
-def cadastro_submit(nome: str = Form(...), email: str = Form(...), senha: str = Form(...), senha2: str = Form(...)):
+def cadastro_submit(request: Request, nome: str = Form(...), email: str = Form(...), senha: str = Form(...),
+                    senha2: str = Form(...), site: str = Form("")):
     nome, email = nome.strip()[:60], email.strip().lower()
+    if site.strip():   # campo isca, invisível para pessoas: só robôs preenchem. Finge sucesso e não cria nada.
+        return RedirectResponse("/login?ok=cadastro", status_code=303)
 
     def volta(msg: str):
         return RedirectResponse(f"/cadastro?erro={quote(msg)}&nome={quote(nome)}&email={quote(email)}", status_code=303)
@@ -247,7 +286,12 @@ def cadastro_submit(nome: str = Form(...), email: str = Form(...), senha: str = 
         return volta(f"A senha precisa ter pelo menos {auth.SENHA_MIN} caracteres.")
     if senha != senha2:
         return volta("As duas senhas não são iguais.")
+    if not auth.permitir(f"cadastro:{ip_cliente(request)}", CADASTRO_POR_IP, 3600):
+        return volta("Muitas inscrições deste endereço. Tente de novo mais tarde.")
     with db.session() as conn:
+        pendentes = conn.execute("SELECT COUNT(*) FROM members WHERE status='pendente'").fetchone()[0]
+        if pendentes >= CADASTRO_PENDENTES_MAX:
+            return volta("As inscrições estão temporariamente fechadas. Fale com o administrador.")
         if conn.execute("SELECT 1 FROM members WHERE email=?", (email,)).fetchone():
             return volta("Já existe uma conta com esse e-mail. Use 'Recuperar senha' se precisar.")
         conn.execute(
@@ -256,7 +300,7 @@ def cadastro_submit(nome: str = Form(...), email: str = Form(...), senha: str = 
         )
         admins = [r["email"] for r in conn.execute(
             "SELECT email FROM members WHERE is_admin=1 AND email IS NOT NULL").fetchall()]
-    if mailer.email_habilitado():
+    if mailer.email_habilitado() and pendentes < CADASTRO_AVISO_MAX:
         link = f"{PUBLIC_URL}/admin/membros" if PUBLIC_URL else "/admin/membros"
         for adm in admins:
             enviar_email_silencioso(
@@ -306,6 +350,8 @@ def esqueci_enviar(request: Request, email: str = Form(...)):
     if not EMAIL_RE.match(email):
         return RedirectResponse(f"/esqueci?erro={quote('Digite um e-mail válido.')}&email={quote(email)}", status_code=303)
     enviado = RedirectResponse(f"/esqueci/enviado?e={quote(email)}", status_code=303)
+    if not auth.permitir(f"esqueci:{ip_cliente(request)}", ESQUECI_POR_IP, 3600):
+        return enviado   # mesma resposta de sempre: não revela que o limite foi atingido
     with db.session() as conn:
         row = conn.execute("SELECT id, name, email FROM members WHERE email=? AND status='ativo'", (email,)).fetchone()
         if not row:
