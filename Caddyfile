@@ -1,0 +1,3 @@
+devocional.seudominio.com.br {
+    reverse_proxy app:8000
+}

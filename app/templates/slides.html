@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Slides — {{ devo['titulo'] }}{% endblock %}
+{% block content %}
+<div class="main" style="padding-top:28px">
+  <div class="topbar" style="padding:0">
+    <a href="/d/{{ devo['slug'] }}" class="icon-btn" aria-label="Voltar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></a>
+    <span style="font-size:14px; font-weight:600; color:var(--text-soft)">Passo 3 de 5 · Slides</span>
+    <span style="width:44px"></span>
+  </div>
+  <h1 style="margin:0; font-size:22px; font-weight:700">{{ devo['titulo'] }}</h1>
+  {% if tem_pdf %}
+  <iframe class="pdf-embed" src="/d/{{ devo['slug'] }}/midia/{{ devo.get('apresentacao', 'apresentacao.pdf') }}"></iframe>
+  <a href="/d/{{ devo['slug'] }}/midia/{{ devo.get('apresentacao', 'apresentacao.pdf') }}" target="_blank" class="btn-secondary" style="text-align:center; text-decoration:none">Abrir em tela cheia</a>
+  {% else %}
+  <p style="text-align:center; color:var(--text-soft); font-size:14px">Apresentação ainda não publicada para esta devocional.</p>
+  {% endif %}
+  <a href="/d/{{ devo['slug'] }}/quiz" class="btn-primary" style="display:flex; align-items:center; justify-content:center; text-decoration:none">Próximo passo: Quiz</a>
+</div>
+{% endblock %}

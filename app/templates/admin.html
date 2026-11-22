@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Admin{% endblock %}
+{% block content %}
+<form method="post" action="/admin/publicar" enctype="multipart/form-data" class="main" style="padding-top:28px">
+  <div class="topbar" style="padding:0">
+    <h1 style="margin:0; font-size:24px; font-weight:700">Nova devocional</h1>
+    <span style="font-size:12px; font-weight:600; background:var(--indigo-tint); color:var(--indigo); padding:6px 12px; border-radius:999px">Admin</span>
+  </div>
+
+  {% if request.query_params.get('publicado') %}
+  <div class="explicacao"><span class="ok">Publicado! A família já consegue ver.</span></div>
+  {% endif %}
+  {% if erro_msg %}
+  <p class="erro">Não publicado: {{ erro_msg }}</p>
+  {% endif %}
+
+  <div class="campo">
+    <label for="titulo">Título</label>
+    <input id="titulo" name="titulo" type="text" required>
+  </div>
+  <div class="linhas-duplas">
+    <div class="campo"><label for="data">Data</label><input id="data" name="data" type="date" required></div>
+    <div class="campo"><label for="versiculo">Versículo-chave</label><input id="versiculo" name="versiculo" type="text" placeholder="1 Tessalonicenses 5:18"></div>
+  </div>
+
+  <div style="display:flex; flex-direction:column; gap:8px">
+    <h2 style="margin:0; font-size:13px; font-weight:700">Arquivos</h2>
+    <div class="linha-arquivo"><span>Áudio (.m4a/.mp3)</span><input type="file" name="audio" accept="audio/*" required></div>
+    <div class="linha-arquivo"><span>Texto (.md)</span><input type="file" name="texto" accept=".md,.markdown,text/*" required></div>
+    <div class="linha-arquivo"><span>Apresentação (.pdf)</span><input type="file" name="apresentacao" accept="application/pdf" required></div>
+    <div class="linha-arquivo"><span>Quiz (.json)</span><input type="file" name="quiz" accept="application/json,.json" required></div>
+    <div class="linha-arquivo"><span>Lições (.md)</span><input type="file" name="licoes" accept=".md,.markdown,text/*" required></div>
+  </div>
+
+  <button type="submit" class="btn-primary" style="margin-top:auto">Publicar para a família</button>
+</form>
+
+<div class="main" style="padding-top:0">
+  <h2 class="section-title">Já publicadas</h2>
+  <div class="lista-anteriores">
+    {% for d in devotionals %}
+    <a href="/d/{{ d['slug'] }}" class="item-anterior">
+      <span><span class="titulo">{{ d['titulo'] }}</span><br><span class="meta">{{ d['data'] }}</span></span>
+    </a>
+    {% else %}
+    <p style="color:var(--text-soft); font-size:14px">Nenhuma devocional publicada ainda.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

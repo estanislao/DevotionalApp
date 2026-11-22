@@ -1,0 +1,9 @@
+app/data/
+app/__pycache__/
+**/__pycache__/
+.env
+*.pyc
+
+# zip original e artefatos locais
+*.zip
+.DS_Store

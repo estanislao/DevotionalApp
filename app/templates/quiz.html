@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Quiz — {{ devo['titulo'] }}{% endblock %}
+{% block content %}
+<div class="main" style="padding-top:28px">
+  <div class="topbar" style="padding:0; align-items:center">
+    <a href="/d/{{ devo['slug'] }}" class="icon-btn" aria-label="Fechar quiz"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></a>
+    <div class="quiz-progresso">
+      {% for p in perguntas %}<span class="{{ 'feita' if p['id'] in respondidas else '' }}"></span>{% endfor %}
+    </div>
+  </div>
+
+  {% if not perguntas %}
+  <p style="text-align:center; color:var(--text-soft); font-size:14px">Quiz ainda não publicado para esta devocional.</p>
+  <a href="/d/{{ devo['slug'] }}/praticar" class="btn-primary" style="display:flex; align-items:center; justify-content:center; text-decoration:none">Pular para Praticar</a>
+  {% endif %}
+
+  {% for p in perguntas %}
+  {% set resp = respondidas.get(p['id']) %}
+  <div id="{{ p['id'] }}" style="display:flex; flex-direction:column; gap:18px; {{ '' if loop.first or (loop.index0 > 0 and perguntas[loop.index0 - 1]['id'] in respondidas) else 'display:none' }}">
+    <div style="display:flex; flex-direction:column; gap:10px">
+      <span style="font-size:13px; font-weight:600; color:var(--indigo)">Pergunta {{ loop.index }} de {{ total }}</span>
+      <h1 style="margin:0; font-size:24px; line-height:1.3; font-weight:700">{{ p['pergunta'] }}</h1>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:10px">
+      {% for op in p['opcoes'] %}
+        {% if resp %}
+          <div class="opcao {% if op == p['correta'] %}certa{% elif op == resp['chosen'] %}errada{% endif %}">
+            {{ op }}
+            {% if op == p['correta'] %}<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg>{% endif %}
+          </div>
+        {% else %}
+          <form method="post" action="/d/{{ devo['slug'] }}/quiz/responder">
+            <input type="hidden" name="question_id" value="{{ p['id'] }}">
+            <input type="hidden" name="escolha" value="{{ op }}">
+            <button type="submit" class="opcao">{{ op }}</button>
+          </form>
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% if resp %}
+    <div class="explicacao">
+      <span class="ok">{{ 'Isso mesmo!' if resp['is_correct'] else 'Quase lá.' }}</span>
+      <p style="margin:0; font-size:14px; line-height:1.5; color:var(--text-soft)">{{ p.get('explicacao', '') }}</p>
+    </div>
+    {% if not loop.last %}
+    <a href="#{{ perguntas[loop.index0 + 1]['id'] }}" class="btn-primary" style="display:flex; align-items:center; justify-content:center; text-decoration:none" onclick="irPara('{{ perguntas[loop.index0 + 1]['id'] }}')">Próxima pergunta</a>
+    {% else %}
+    <a href="/d/{{ devo['slug'] }}/praticar" class="btn-primary" style="display:flex; align-items:center; justify-content:center; text-decoration:none">Ir para Praticar</a>
+    {% endif %}
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+<script>
+function irPara(id) {
+  document.querySelectorAll('.main > div[id]').forEach(d => d.style.display = 'none');
+  const alvo = document.getElementById(id);
+  if (alvo) alvo.style.display = 'flex';
+}
+if (location.hash) {
+  const id = location.hash.replace('#', '').replace('-resposta', '');
+  irPara(id);
+}
+</script>
+{% endblock %}
