@@ -9,11 +9,16 @@ services:
     volumes:
       - ./devocionais:/srv/devocionais
       - db_data:/srv/app/data
-    expose:
-      - "8000"
+    # Só a própria VM enxerga essa porta. Quem expõe na internet é o Caddy.
+    ports:
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8600}:8000"
 
+  # Caddy próprio, para uma VM dedicada. Numa VM que já tem Caddy/Nginx
+  # nas portas 80/443, não suba este serviço: aponte o proxy existente
+  # para 127.0.0.1:8600 (veja o README).
   caddy:
     image: caddy:2-alpine
+    profiles: ["standalone"]
     restart: unless-stopped
     ports:
       - "80:80"

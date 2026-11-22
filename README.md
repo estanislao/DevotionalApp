@@ -47,13 +47,33 @@ nano .env                    # preencha SESSION_SECRET (openssl rand -hex 32) e 
 # Caddyfile já está com trilhadefe.app; edite só se o domínio mudar
 
 # 3. Suba
-docker compose up -d --build
+docker compose --profile standalone up -d --build
 
 # 4. Acompanhe o primeiro boot (emissão do certificado HTTPS pode levar uns segundos)
-docker compose logs -f
+docker compose --profile standalone logs -f
 ```
 
-Depois disso, `https://seu-dominio` já está no ar. A família acessa, faz login com nome + PIN, e no Safari/Chrome do celular pode usar "Adicionar à tela de início" para instalar como app.
+Depois disso, `https://seu-dominio` já está no ar.
+
+### VM que já tem Caddy (ou outro proxy) nas portas 80/443
+
+Não suba o serviço `caddy` do compose (basta omitir `--profile standalone`). O app fica escutando só em `127.0.0.1:8600` e o proxy existente aponta para ele. No Caddy nativo, acrescente ao `/etc/caddy/Caddyfile`:
+
+```text
+trilhadefe.app {
+    encode zstd gzip
+    request_body {
+        max_size 250MB
+    }
+    reverse_proxy 127.0.0.1:8600
+}
+
+www.trilhadefe.app {
+    redir https://trilhadefe.app{uri} permanent
+}
+```
+
+e recarregue com `caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy`. Para subir o app: `docker compose up -d --build`. Para trocar a porta local, defina `APP_PORT` no `.env`. A família acessa, faz login com nome + PIN, e no Safari/Chrome do celular pode usar "Adicionar à tela de início" para instalar como app.
 
 ### Publicando uma devocional nova
 
