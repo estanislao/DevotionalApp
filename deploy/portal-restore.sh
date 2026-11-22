@@ -20,7 +20,7 @@ TMP=$(mktemp); trap 'rm -f "$TMP"' EXIT
 case "$ARQ" in
   *.enc)
     [ -s "$CHAVE" ] || { echo "backup cifrado, mas a chave não está em $CHAVE (defina CHAVE=/caminho/da/chave)" >&2; exit 1; }
-    openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass "file:$CHAVE" -in "$ARQ" 2>/dev/null | gunzip -c > "$TMP" \
+    openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass "file:$CHAVE" -in "$ARQ" 2>/dev/null | gunzip -c 2>/dev/null > "$TMP" \
       || { echo "não consegui abrir o backup cifrado: a chave está errada ou o arquivo foi alterado. Nada foi restaurado." >&2; exit 1; } ;;
   *) gunzip -c "$ARQ" > "$TMP" ;;
 esac

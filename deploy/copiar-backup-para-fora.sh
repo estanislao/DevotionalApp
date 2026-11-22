@@ -18,7 +18,8 @@ rsync -az --partial \
   "$HOST:$ORIGEM" "$DEST/"
 
 N=$(ls -1 "$DEST"/portal-*.db.gz.enc 2>/dev/null | wc -l | tr -d ' ')
-ULTIMO=$(ls -1t "$DEST"/portal-*.db.gz.enc 2>/dev/null | head -1 || true)
+# O nome do arquivo já traz data e hora (AAAA-MM-DD-HHMM): ordenar por ele é mais confiável que pela data de modificação.
+ULTIMO=$(ls -1 "$DEST"/portal-*.db.gz.enc 2>/dev/null | sort | tail -1 || true)
 [ -n "$ULTIMO" ] || { echo "nenhum backup cifrado veio da VM (a chave já foi criada e o backup já rodou?)" >&2; exit 1; }
 echo "ok: $N backup(s) cifrado(s) em $DEST; o mais recente é $(basename "$ULTIMO") ($(du -h "$ULTIMO" | cut -f1))"
 echo "espelho das devocionais: $(du -sh "$DEST/devocionais-espelho" 2>/dev/null | cut -f1)"

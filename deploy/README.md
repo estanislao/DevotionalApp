@@ -10,7 +10,9 @@ Perder o disco da VM não deve levar o procedimento junto: está tudo aqui.
 | `cron.d/portal-devocional` | `/etc/cron.d/` | Agenda o backup às 03:30 |
 | `logrotate.d/portal-backup` | `/etc/logrotate.d/` | Rotação semanal do log do backup |
 | `Caddyfile.trilhadefe` | dentro de `/etc/caddy/Caddyfile` | Bloco do site, com limite de corpo por rota |
-| `instalar-na-vm.sh` | roda uma vez | Instala os quatro primeiros itens (idempotente) |
+| `instalar-na-vm.sh` | roda uma vez | Instala os quatro primeiros itens e cria a chave de cifra se faltar (idempotente) |
+| `copiar-backup-para-fora.sh` | roda em OUTRO computador | Traz os backups cifrados para fora da VM |
+| `exemplo-launchd-macos.plist` | opcional, no Mac | Agenda a cópia diária (não é instalado sozinho) |
 
 ## Instalar ou reinstalar
 
@@ -28,36 +30,60 @@ hospedar outros sites:
 
 ## Backup
 
-Roda sozinho todo dia. Para rodar na hora: `sudo /usr/local/bin/portal-backup.sh`. Guarda em
+Roda sozinho todo dia (03:30). Para rodar na hora: `sudo /usr/local/bin/portal-backup.sh`. Guarda em
 `/opt/backups/portal-devocional/`:
 
-- `portal-AAAA-MM-DD-HHMM.db.gz`: o banco, copiado com a API de backup do SQLite, **conferido** (integridade, as 8
-  tabelas esperadas e a mesma contagem de membros do banco vivo) e mantido por 14 dias;
+- `portal-AAAA-MM-DD-HHMM.db.gz.enc`: o banco, copiado com a API de backup do SQLite, **conferido** (integridade, as 8
+  tabelas esperadas e a mesma contagem de membros do banco vivo), **cifrado** (AES-256, PBKDF2 de 600 mil
+  iterações) e mantido por 14 dias. A cifra é conferida na hora: o script decifra o arquivo de volta e compara
+  byte a byte com o original antes de apagar a versão sem cifra;
 - `devocionais-espelho/`: espelho das devocionais, sem os slides (que se regeram) e **sem apagar** o que for removido
-  na origem.
+  na origem. É o conteúdo da própria família, por isso não é cifrado.
 
 Se qualquer conferência falhar, o script termina com erro e escreve `FALHA` em `/var/log/portal-backup.log`.
 
-**Esses arquivos ficam na mesma VM.** Para proteger de perda do disco, copie-os para fora, por exemplo, de outro
-computador: `rsync -avz usuario@servidor:/opt/backups/portal-devocional/ ~/Backups/trilhadefe/`. Os backups
-contêm hashes de senha e as anotações dos membros em texto simples: guarde a cópia externa num lugar cifrado.
+### A chave de cifra (a única coisa que você precisa guardar à parte)
+
+O instalador cria `/root/.portal-backup.key` (modo 600) **uma vez** e nunca a troca. **Sem ela os backups não abrem,
+e se a VM se perder a chave se perde junto.** Guarde uma cópia fora da VM, num gerenciador de senhas:
+
+```bash
+ssh diana-server cat /root/.portal-backup.key        # copie o resultado para o gerenciador de senhas
+```
+
+### Cópia para fora da VM
+
+Num computador seu (não na VM):
+
+```bash
+./deploy/copiar-backup-para-fora.sh diana-server ~/Backups/trilhadefe
+```
+
+Traz só os bancos **cifrados** e o espelho das devocionais; um backup em texto simples nunca é copiado, e a chave
+nunca passa por esse caminho. Os arquivos que a VM apagar pela retenção continuam na sua cópia. Para agendar no
+macOS, veja `exemplo-launchd-macos.plist` (não é instalado sozinho). Para abrir um backup cifrado fora da VM:
+
+```bash
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass file:/caminho/da/chave -in portal-AAAA-MM-DD-HHMM.db.gz.enc | gunzip > portal.db
+```
 
 ## Restaurar
 
 ```bash
-sudo /usr/local/bin/portal-restore.sh /opt/backups/portal-devocional/portal-AAAA-MM-DD-HHMM.db.gz
+sudo /usr/local/bin/portal-restore.sh /opt/backups/portal-devocional/portal-AAAA-MM-DD-HHMM.db.gz.enc
 ```
 
-O script confere o backup **antes** de tocar em qualquer coisa (recusa arquivo vazio ou corrompido), guarda o
-banco atual ao lado (`portal.db.antes-da-restauracao-...`), restaura **como o usuário do app** e reinicia o app.
-Gravar o banco como root deixaria o app sem poder escrever nele (erro `attempt to write a readonly database`),
-e esse caminho já foi ensaiado e corrigido.
+O script abre o backup (com a chave em `/root/.portal-backup.key`, ou a de `CHAVE=`) e o confere **antes** de tocar
+em qualquer coisa. Recusa arquivo vazio, corrompido, **adulterado** ou aberto com a chave errada, e nesses casos
+não restaura nada. Depois guarda o banco atual ao lado (`portal.db.antes-da-restauracao-...`), restaura **como o
+usuário do app** e reinicia o app. Gravar o banco como root deixaria o app sem poder escrever nele (erro
+`attempt to write a readonly database`); esse caminho já foi ensaiado e corrigido.
 
 **Ensaio sem risco**, num volume de teste, sem tocar no app em produção:
 
 ```bash
 docker volume create portal_ensaio_db
-ENSAIO=1 VOLUME=portal_ensaio_db sudo -E /usr/local/bin/portal-restore.sh /opt/backups/portal-devocional/portal-AAAA-MM-DD-HHMM.db.gz
+ENSAIO=1 VOLUME=portal_ensaio_db sudo -E /usr/local/bin/portal-restore.sh /opt/backups/portal-devocional/portal-AAAA-MM-DD-HHMM.db.gz.enc
 docker volume rm portal_ensaio_db
 ```
 
