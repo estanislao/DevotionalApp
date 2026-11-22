@@ -8,3 +8,8 @@ app/__pycache__/
 *.zip
 .DS_Store
 .claude/
+entrada/
+
+# conteúdo real das devocionais (áudio, PDF, texto) fica só no servidor
+devocionais/*
+!devocionais/.gitkeep

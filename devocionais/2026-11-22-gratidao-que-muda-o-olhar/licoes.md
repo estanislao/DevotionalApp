@@ -1,3 +1,0 @@
-- Anotar três motivos de gratidão por dia, mesmo nos dias difíceis.
-- Agradecer em voz alta a alguém da família por algo específico.
-- Começar a oração agradecendo, antes de pedir.

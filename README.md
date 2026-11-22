@@ -47,10 +47,13 @@ cp .env.example .env
 nano .env                    # preencha SESSION_SECRET (openssl rand -hex 32), ADMIN_EMAIL e ADMIN_PASSWORD
 # Caddyfile já está com trilhadefe.app; edite só se o domínio mudar
 
-# 3. Suba
+# 3. O app roda como usuário comum (uid 1000) e precisa gravar em devocionais/
+sudo chown -R 1000:1000 devocionais
+
+# 4. Suba
 docker compose --profile standalone up -d --build
 
-# 4. Acompanhe o primeiro boot (emissão do certificado HTTPS pode levar uns segundos)
+# 5. Acompanhe o primeiro boot (emissão do certificado HTTPS pode levar uns segundos)
 docker compose --profile standalone logs -f
 ```
 
@@ -104,7 +107,7 @@ SESSION_SECRET=segredo-local-de-teste COOKIE_SECURE=0 ADMIN_EMAIL=admin@exemplo.
   uvicorn app.main:app --reload --port 8000
 ```
 
-Abra `http://localhost:8000` — já tem uma devocional de exemplo em `devocionais/` para testar a trilha inteira.
+Abra `http://localhost:8000`, entre como admin e publique uma devocional em `/admin` para testar a trilha. O conteúdo de `devocionais/` não vai para o git.
 
 ## Decisões tomadas (e por quê)
 
