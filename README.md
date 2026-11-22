@@ -87,17 +87,11 @@ Dois lugares para copiar periodicamente:
 - a pasta `devocionais/` (seus arquivos originais)
 - o volume `db_data` (progresso e respostas): `docker compose exec app cat /srv/app/data/portal.db > backup-$(date +%F).db`
 
-### Trocar PIN ou adicionar alguém
+### Trocar PIN, cadastrar e-mail ou adicionar alguém
 
-Edite `SEED_MEMBERS` no `.env` e rode `docker compose up -d --build` de novo — membros novos são criados; os que já existem (mesmo nome) não são duplicados nem têm o PIN sobrescrito automaticamente (isso evita apagar progresso por engano). Para trocar um PIN de alguém que já existe, por enquanto é mais simples editar direto no banco:
-
-```bash
-docker compose exec app python3 -c "
-from app.db import session
-with session() as c:
-    c.execute(\"UPDATE members SET pin=? WHERE name=?\", ('novoPIN', 'Membro 2'))
-"
-```
+- **Trocar PIN / e-mail**: como admin, abra `/admin/membros`. Cada membro tem um campo de e-mail (opcional) e um de novo PIN (em branco mantém o atual). Trocar o PIN também zera o bloqueio por tentativas erradas.
+- **Esqueci meu PIN**: se `BREVO_API_KEY` e `MAIL_FROM` estiverem no `.env`, a tela de login mostra o link "Esqueci meu PIN". A pessoa escolhe quem é e recebe no e-mail cadastrado um link que vale 30 minutos (um envio a cada 5 minutos por membro) para criar um PIN novo. Sem e-mail cadastrado, a tela orienta a falar com o admin.
+- **Adicionar alguém**: acrescente em `SEED_MEMBERS` no `.env` e rode `docker compose up -d --build` — membros novos são criados; os que já existem (mesmo nome) não são duplicados nem têm o PIN sobrescrito.
 
 ## Rodando localmente (para testar antes de subir)
 
@@ -115,4 +109,5 @@ Abra `http://localhost:8000` — já tem uma devocional de exemplo em `devociona
 - **Conclusão automática dos passos**: ouvir conta ao enviar o formulário no fim do áudio (hoje, ao clicar "Próximo passo" — dá pra trocar por um evento `timeupdate` do `<audio>` se quiser que seja automático de verdade), ler conta ao abrir a tela, slides ao abrir, quiz ao responder a última pergunta, praticar ao clicar "Concluir". Nada disso exige um botão de "marcar como feito" à parte.
 - **Sem LGPD/compliance formal**: como você pediu, não tem nada de consentimento, retenção de dados ou exportação — é uma família, 4 contas, dados ficam só no seu volume Docker.
 - **Segurança proporcional**: PIN de 4 dígitos é fraco por natureza, então o login bloqueia o membro por 15 minutos após 5 erros seguidos (contador em memória; reinicia com o container). O app recusa iniciar sem `SESSION_SECRET`, o cookie de sessão só trafega em HTTPS, a resposta certa do quiz é conferida no servidor (nunca vem do formulário) e só os arquivos declarados no `meta.json` são servidos pela rota de mídia. Erros (404, 403, formulário incompleto) mostram uma página amigável em vez de JSON.
+- **Recuperação de PIN por e-mail, não login por e-mail**: o login continua nome + PIN (rápido no celular, sem senha). O e-mail só serve para a pessoa redefinir o próprio PIN sem depender do admin. O envio usa a API HTTP da Brevo via `urllib`, sem dependência nova.
 - **PWA simples**: dá para instalar na tela do celular e abre em tela cheia, mas não funciona 100% offline (só o CSS/ícones ficam em cache) — o conteúdo em si precisa de internet.

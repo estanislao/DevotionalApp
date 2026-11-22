@@ -9,6 +9,9 @@
   {% if erro_msg %}
     <p class="erro">{{ erro_msg }}</p>
   {% endif %}
+  {% if ok_msg %}
+    <div class="explicacao"><span class="ok">{{ ok_msg }}</span></div>
+  {% endif %}
   <form method="post" action="/login" id="form-login" style="display:flex; flex-direction:column; gap:20px">
     <input type="hidden" name="member_id" id="member_id">
     <div class="membro-grid">
@@ -22,6 +25,9 @@
     <input class="pin-input" type="password" inputmode="numeric" name="pin" placeholder="••••" maxlength="6" required>
     <button type="submit" class="btn-primary">Entrar</button>
   </form>
+  {% if email_habilitado %}
+  <a href="/esqueci" style="text-align:center; font-size:14px; color:var(--indigo); font-weight:600; text-decoration:none">Esqueci meu PIN</a>
+  {% endif %}
 </div>
 <script>
 function selecionar(btn) {

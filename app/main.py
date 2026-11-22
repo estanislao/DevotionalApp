@@ -15,8 +15,10 @@ import os
 import re
 import json
 import unicodedata
+import secrets
+import hashlib
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
@@ -26,7 +28,7 @@ from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import db, content, auth
+from . import db, content, auth, mailer
 
 BASE_DIR = Path(__file__).parent
 DEVOCIONAIS_DIR = BASE_DIR.parent / "devocionais"
@@ -37,6 +39,10 @@ LIMITE_PDF = 50 * 1024 * 1024
 LIMITE_TEXTO = 2 * 1024 * 1024
 EXT_AUDIO = {".mp3", ".m4a", ".aac", ".ogg", ".wav"}
 EXT_PDF = {".pdf"}
+PIN_RE = re.compile(r"^\d{4,6}$")
+RESET_VALIDADE = timedelta(minutes=30)
+RESET_INTERVALO = timedelta(minutes=5)   # um e-mail por membro a cada 5 min
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
 
 
 def agora() -> str:
@@ -147,8 +153,11 @@ def login_form(request: Request):
         "membro": "Escolha quem é você antes de digitar o PIN.",
         "bloqueado": "Muitas tentativas erradas. Espere alguns minutos e tente de novo.",
     }
+    ok = request.query_params.get("ok")
+    ok_msgs = {"pin": "PIN redefinido. Entre com o novo."}
     return templates.TemplateResponse(request, "login.html", {
-        "members": members, "erro_msg": mensagens.get(erro),
+        "members": members, "erro_msg": mensagens.get(erro), "ok_msg": ok_msgs.get(ok),
+        "email_habilitado": mailer.email_habilitado(),
     })
 
 
@@ -362,6 +371,145 @@ def admin_home(request: Request):
         "devotionals": devotionals,
         "erro_msg": request.query_params.get("erro"),
     })
+
+
+# ---------- Admin: membros (trocar PIN, cadastrar e-mail) ----------
+
+@app.get("/admin/membros", response_class=HTMLResponse)
+def admin_membros(request: Request):
+    auth.require_admin(request)
+    with db.session() as conn:
+        members = conn.execute("SELECT id, name, email, is_admin FROM members ORDER BY id").fetchall()
+    return templates.TemplateResponse(request, "admin_membros.html", {
+        "members": members,
+        "ok_msg": request.query_params.get("ok"),
+        "erro_msg": request.query_params.get("erro"),
+        "email_habilitado": mailer.email_habilitado(),
+    })
+
+
+@app.post("/admin/membros/{member_id}")
+def admin_membro_salvar(request: Request, member_id: int, pin: str = Form(""), email: str = Form("")):
+    auth.require_admin(request)
+    pin, email = pin.strip(), email.strip().lower()
+
+    def volta(param: str, msg: str):
+        return RedirectResponse(f"/admin/membros?{param}={quote(msg)}", status_code=303)
+
+    if pin and not PIN_RE.match(pin):
+        return volta("erro", "PIN deve ter de 4 a 6 números.")
+    if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        return volta("erro", "E-mail inválido.")
+    with db.session() as conn:
+        row = conn.execute("SELECT id, name FROM members WHERE id=?", (member_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Membro não encontrado.")
+        conn.execute("UPDATE members SET email=? WHERE id=?", (email or None, member_id))
+        if pin:
+            conn.execute("UPDATE members SET pin=? WHERE id=?", (pin, member_id))
+            auth.registrar_acerto(member_id)  # zera bloqueio de tentativas
+    feito = "PIN e e-mail" if pin else "E-mail"
+    return volta("ok", f"{feito} de {row['name']} salvo.")
+
+
+# ---------- Esqueci meu PIN (link por e-mail) ----------
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+@app.get("/esqueci", response_class=HTMLResponse)
+def esqueci_form(request: Request):
+    if auth.current_member(request):
+        return RedirectResponse("/")
+    with db.session() as conn:
+        members = conn.execute("SELECT id, name FROM members ORDER BY id").fetchall()
+    return templates.TemplateResponse(request, "esqueci.html", {
+        "members": members,
+        "email_habilitado": mailer.email_habilitado(),
+        "enviado": request.query_params.get("enviado"),
+        "erro_msg": request.query_params.get("erro"),
+    })
+
+
+@app.post("/esqueci")
+def esqueci_enviar(request: Request, member_id: int = Form(...)):
+    def volta(param: str, msg: str):
+        return RedirectResponse(f"/esqueci?{param}={quote(msg)}", status_code=303)
+
+    if not mailer.email_habilitado():
+        return volta("erro", "Envio de e-mail não está configurado. Peça o PIN ao administrador.")
+    with db.session() as conn:
+        row = conn.execute("SELECT id, name, email FROM members WHERE id=?", (member_id,)).fetchone()
+        if not row:
+            return volta("erro", "Membro não encontrado.")
+        if not row["email"]:
+            return volta("erro", f"{row['name']} não tem e-mail cadastrado. Peça ao administrador para cadastrar ou redefinir o PIN.")
+        ultimo = conn.execute(
+            "SELECT created_at FROM pin_resets WHERE member_id=? ORDER BY id DESC LIMIT 1", (member_id,)
+        ).fetchone()
+        if ultimo and datetime.fromisoformat(ultimo["created_at"]) + RESET_INTERVALO > datetime.now(timezone.utc):
+            return volta("erro", "Já enviamos um link há pouco. Confira a caixa de entrada e o spam, ou espere 5 minutos.")
+        token = secrets.token_urlsafe(32)
+        agora_dt = datetime.now(timezone.utc)
+        conn.execute(
+            "INSERT INTO pin_resets (member_id, token_hash, created_at, expires_at) VALUES (?,?,?,?)",
+            (member_id, _hash_token(token), agora_dt.isoformat(), (agora_dt + RESET_VALIDADE).isoformat()),
+        )
+    base = PUBLIC_URL or str(request.base_url).rstrip("/")
+    link = f"{base}/redefinir/{token}"
+    texto = (f"Olá, {row['name']}.\n\nPara criar um novo PIN no Portal de Devocionais, abra este link "
+             f"(vale por 30 minutos):\n\n{link}\n\nSe não foi você que pediu, ignore este e-mail.")
+    html = (f"<p>Olá, {row['name']}.</p><p>Para criar um novo PIN no Portal de Devocionais, toque no botão abaixo "
+            f"(vale por 30 minutos):</p><p><a href=\"{link}\" style=\"display:inline-block;padding:12px 20px;"
+            f"background:#2E3192;color:#fff;border-radius:10px;text-decoration:none;font-weight:600\">Criar novo PIN</a></p>"
+            f"<p style=\"color:#666;font-size:13px\">Se não foi você que pediu, ignore este e-mail.<br>Link: {link}</p>")
+    try:
+        mailer.enviar(row["email"], "Seu link para criar um novo PIN", texto, html)
+    except RuntimeError as e:
+        return volta("erro", f"Não conseguimos enviar o e-mail: {e}")
+    mascarado = re.sub(r"^(.).*?(@.*)$", r"\1***\2", row["email"])
+    return volta("enviado", mascarado)
+
+
+def _reset_valido(conn, token: str):
+    row = conn.execute("SELECT * FROM pin_resets WHERE token_hash=?", (_hash_token(token),)).fetchone()
+    if not row or row["used_at"]:
+        return None
+    if datetime.fromisoformat(row["expires_at"]) < datetime.now(timezone.utc):
+        return None
+    return row
+
+
+@app.get("/redefinir/{token}", response_class=HTMLResponse)
+def redefinir_form(request: Request, token: str):
+    with db.session() as conn:
+        reset = _reset_valido(conn, token)
+        if not reset:
+            return pagina_erro(request, 400, "Link inválido ou vencido",
+                               "Esse link já foi usado ou passou dos 30 minutos. Peça um novo em 'Esqueci meu PIN'.")
+        membro = conn.execute("SELECT name FROM members WHERE id=?", (reset["member_id"],)).fetchone()
+    return templates.TemplateResponse(request, "redefinir.html", {
+        "token": token, "nome": membro["name"], "erro_msg": request.query_params.get("erro"),
+    })
+
+
+@app.post("/redefinir/{token}")
+def redefinir_salvar(request: Request, token: str, pin: str = Form(...), pin2: str = Form(...)):
+    pin, pin2 = pin.strip(), pin2.strip()
+    if not PIN_RE.match(pin):
+        return RedirectResponse(f"/redefinir/{token}?erro={quote('PIN deve ter de 4 a 6 números.')}", status_code=303)
+    if pin != pin2:
+        return RedirectResponse(f"/redefinir/{token}?erro={quote('Os dois PINs não são iguais.')}", status_code=303)
+    with db.session() as conn:
+        reset = _reset_valido(conn, token)
+        if not reset:
+            return pagina_erro(request, 400, "Link inválido ou vencido",
+                               "Esse link já foi usado ou passou dos 30 minutos. Peça um novo em 'Esqueci meu PIN'.")
+        conn.execute("UPDATE members SET pin=? WHERE id=?", (pin, reset["member_id"]))
+        conn.execute("UPDATE pin_resets SET used_at=? WHERE id=?", (agora(), reset["id"]))
+        auth.registrar_acerto(reset["member_id"])
+    return RedirectResponse("/login?ok=pin", status_code=303)
 
 
 def slugify(s: str) -> str:

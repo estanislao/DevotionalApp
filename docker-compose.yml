@@ -6,6 +6,10 @@ services:
       - SESSION_SECRET=${SESSION_SECRET}
       - SEED_MEMBERS=${SEED_MEMBERS}
       - COOKIE_SECURE=${COOKIE_SECURE:-1}
+      - PUBLIC_URL=${PUBLIC_URL:-}
+      - BREVO_API_KEY=${BREVO_API_KEY:-}
+      - MAIL_FROM=${MAIL_FROM:-}
+      - MAIL_FROM_NAME=${MAIL_FROM_NAME:-Portal de Devocionais}
     volumes:
       - ./devocionais:/srv/devocionais
       - db_data:/srv/app/data

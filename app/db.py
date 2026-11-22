@@ -37,6 +37,16 @@ CREATE TABLE IF NOT EXISTS quiz_answers (
     FOREIGN KEY(member_id) REFERENCES members(id)
 );
 
+CREATE TABLE IF NOT EXISTS pin_resets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    member_id INTEGER NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    FOREIGN KEY(member_id) REFERENCES members(id)
+);
+
 CREATE TABLE IF NOT EXISTS notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     member_id INTEGER NOT NULL,
@@ -61,6 +71,11 @@ def init_db(seed_members: list[dict] | None = None) -> None:
     conn = get_conn()
     conn.executescript(SCHEMA)
     conn.commit()
+    # Migração leve: coluna email entrou depois da primeira versão.
+    colunas = {r["name"] for r in conn.execute("PRAGMA table_info(members)").fetchall()}
+    if "email" not in colunas:
+        conn.execute("ALTER TABLE members ADD COLUMN email TEXT")
+        conn.commit()
     if seed_members:
         for m in seed_members:
             existing = conn.execute(
