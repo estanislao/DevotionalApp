@@ -238,7 +238,7 @@ def cadastro_submit(nome: str = Form(...), email: str = Form(...), senha: str = 
         return volta("As duas senhas não são iguais.")
     with db.session() as conn:
         if conn.execute("SELECT 1 FROM members WHERE email=?", (email,)).fetchone():
-            return volta("Já existe uma conta com esse e-mail. Use 'Esqueci minha senha' se precisar.")
+            return volta("Já existe uma conta com esse e-mail. Use 'Recuperar senha' se precisar.")
         conn.execute(
             "INSERT INTO members (name, email, password_hash, pin, is_admin, status, created_at) VALUES (?,?,?,'',0,'pendente',?)",
             (nome, email, auth.hash_senha(senha), agora()),
@@ -317,7 +317,7 @@ def _reset_valido(conn, token: str):
 
 
 LINK_VENCIDO = ("Link inválido ou vencido",
-                "Esse link já foi usado ou passou dos 30 minutos. Peça um novo em 'Esqueci minha senha'.")
+                "Esse link já foi usado ou passou dos 30 minutos. Peça um novo em 'Recuperar senha'.")
 
 
 @app.get("/redefinir/{token}", response_class=HTMLResponse)
