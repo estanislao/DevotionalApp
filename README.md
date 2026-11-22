@@ -99,6 +99,15 @@ Dois lugares para copiar periodicamente:
 - **Coleções**: criadas e editadas só pelo admin em `/admin/colecoes` (nome e descrição). Não dá para excluir coleção que ainda tem devocionais. No início, a aba Coleções lista todas e a aba Últimas mostra as 10 mais recentes.
 - **Força bruta**: 5 senhas erradas seguidas bloqueiam o e-mail por 15 minutos (contador em memória, zera ao reiniciar).
 
+## Testes
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+Os testes usam um banco e uma pasta de devocionais temporários; não tocam em dados reais.
+
 ## Rodando localmente (para testar antes de subir)
 
 ```bash
@@ -118,4 +127,6 @@ Abra `http://localhost:8000`, entre como admin e publique uma devocional em `/ad
 - **Sem LGPD/compliance formal**: como você pediu, não tem nada de consentimento, retenção de dados ou exportação — é uma família, 4 contas, dados ficam só no seu volume Docker.
 - **Segurança proporcional**: bloqueio por 15 minutos após 5 senhas erradas (contador em memória; reinicia com o container). O app recusa iniciar sem `SESSION_SECRET`, o cookie de sessão só trafega em HTTPS, a resposta certa do quiz é conferida no servidor (nunca vem do formulário) e só os arquivos declarados no `meta.json` são servidos pela rota de mídia. Erros (404, 403, formulário incompleto) mostram uma página amigável em vez de JSON.
 - **Login por e-mail + senha com cadastro aberto e aprovação manual** (substituiu o PIN com membros fixos da primeira versão): quem entra escolhe o próprio nome; o admin é o filtro. Senhas com PBKDF2 da biblioteca padrão. E-mails pela API HTTP da Brevo via `urllib`, sem dependência nova.
+- **Controles contra abuso**: cabeçalhos de segurança em todas as respostas (CSP, HSTS, nosniff, SAMEORIGIN, Referrer-Policy, Permissions-Policy); cadastro com limite de 5 por hora por IP, campo isca e teto de 100 pendentes; login e recuperação de senha também limitados por IP. Os contadores ficam em memória e zeram ao reiniciar o container.
+- **Backup**: o servidor faz backup diário do banco (com 14 dias de retenção) e espelha as devocionais; veja a seção Backup. Falta ainda uma cópia fora da VM.
 - **PWA simples**: dá para instalar na tela do celular e abre em tela cheia, mas não funciona 100% offline (só o CSS/ícones ficam em cache) — o conteúdo em si precisa de internet.
