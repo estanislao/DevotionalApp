@@ -39,6 +39,8 @@ LIMITE_PDF = 50 * 1024 * 1024
 LIMITE_TEXTO = 2 * 1024 * 1024
 EXT_AUDIO = {".mp3", ".m4a", ".aac", ".ogg", ".wav"}
 EXT_PDF = {".pdf"}
+TIPOS_MIDIA = {".m4a": "audio/mp4", ".mp3": "audio/mpeg", ".aac": "audio/aac", ".ogg": "audio/ogg",
+               ".wav": "audio/wav", ".pdf": "application/pdf"}
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 RESET_VALIDADE = timedelta(minutes=30)
 RESET_INTERVALO = timedelta(minutes=5)   # um e-mail por conta a cada 5 min
@@ -601,7 +603,8 @@ def midia(request: Request, slug: str, filename: str):
     path = content.media_path(devo, filename)
     if not path:
         raise HTTPException(404, "Arquivo não encontrado.")
-    return FileResponse(path)
+    # Tipo explícito: a imagem slim não conhece .m4a e mandaria octet-stream, que o Safari do iPhone não toca.
+    return FileResponse(path, media_type=TIPOS_MIDIA.get(path.suffix.lower()), content_disposition_type="inline")
 
 
 # ---------- Admin: publicar ----------
