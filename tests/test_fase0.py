@@ -1,9 +1,9 @@
 """Regressão dos achados R-01 (XSS pelo nome), N-02 (HTML nos e-mails) e R-02 (corpo gigante)."""
-from tests.conftest import entrar
+from tests.conftest import entrar, cadastro
 
 
 def cadastrar(c, nome, email, senha="segredo123"):
-    return c.post("/cadastro", data={"nome": nome, "email": email, "senha": senha, "senha2": senha})
+    return cadastro(c, nome, email, senha)
 
 
 def test_r01_nome_com_apostrofo_nao_vira_javascript(client):

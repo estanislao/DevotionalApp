@@ -13,6 +13,7 @@ Rotas principais:
 """
 import os
 import re
+import hmac
 import html as _html
 import json
 import unicodedata
@@ -21,9 +22,9 @@ import hashlib
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
-from fastapi import FastAPI, Request, Form, UploadFile, File, HTTPException
+from fastapi import FastAPI, Request, Form, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -50,6 +51,9 @@ RESET_INTERVALO = timedelta(minutes=5)   # um e-mail por conta a cada 5 min
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
 APP_NOME = "Trilha de Fé"
 PARTILHA_MAX = 280
+# Cadastro por convite: sem CADASTRO_CODIGO no .env as inscrições ficam fechadas.
+CADASTRO_CODIGO = os.environ.get("CADASTRO_CODIGO", "").strip()
+CONVITE_ERROS_POR_IP = 10     # tentativas de código errado por hora
 CORPO_MAX_PADRAO = 1 * 1024 * 1024            # 1 MB em qualquer rota
 CORPO_MAX_PUBLICAR = 260 * 1024 * 1024       # só /admin/publicar aceita arquivos grandes
 # Limites contra abuso (por IP; contadores em memória, zeram ao reiniciar)
@@ -104,11 +108,29 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 
+def origem_invalida(request: Request) -> bool:
+    """Recusa POST que veio de outro site (defesa em profundidade além do SameSite=Lax do cookie)."""
+    site = request.headers.get("sec-fetch-site", "")
+    origem = request.headers.get("origin", "")
+    if site == "cross-site":
+        return True
+    if not origem:
+        return False          # clientes que não mandam Origin (curl, testes); o navegador sempre manda em POST
+    if origem == "null":
+        return site not in ("same-origin", "none")
+    permitidos = {request.headers.get("host", "")}
+    if PUBLIC_URL:
+        permitidos.add(urlsplit(PUBLIC_URL).netloc)
+    return urlsplit(origem).netloc not in permitidos
+
+
 @app.middleware("http")
 async def cabecalhos_de_seguranca(request: Request, call_next):
     tamanho = request.headers.get("content-length", "")
     limite = CORPO_MAX_PUBLICAR if request.url.path == "/admin/publicar" else CORPO_MAX_PADRAO
-    if request.method in ("POST", "PUT", "PATCH") and tamanho.isdigit() and int(tamanho) > limite:
+    if request.method in ("POST", "PUT", "PATCH", "DELETE") and origem_invalida(request):
+        resp = Response("Origem não permitida.", status_code=403, media_type="text/plain; charset=utf-8")
+    elif request.method in ("POST", "PUT", "PATCH") and tamanho.isdigit() and int(tamanho) > limite:
         resp = Response("Corpo da requisição grande demais.", status_code=413, media_type="text/plain; charset=utf-8")
     else:
         resp = await call_next(request)
@@ -224,7 +246,7 @@ def login_form(request: Request):
     ok = request.query_params.get("ok")
     ok_msgs = {
         "senha": "Senha redefinida. Entre com a nova.",
-        "cadastro": "Inscrição enviada! Você poderá entrar assim que o administrador aprovar.",
+        "cadastro": "Inscrição enviada! Você poderá entrar assim que o administrador aprovar. Se você já tinha conta, use 'Recuperar senha'.",
     }
     return templates.TemplateResponse(request, "login.html", {
         "erro_msg": mensagens.get(erro), "ok_msg": ok_msgs.get(ok),
@@ -233,10 +255,10 @@ def login_form(request: Request):
     })
 
 
-def sessao_cookie(resp, member_id: int):
+def sessao_cookie(resp, member_id: int, version: int = 0):
     resp.set_cookie(
         auth.COOKIE_NAME,
-        auth.make_session_cookie(member_id),
+        auth.make_session_cookie(member_id, version),
         max_age=auth.MAX_AGE,
         httponly=True,
         secure=auth.COOKIE_SECURE,
@@ -247,20 +269,24 @@ def sessao_cookie(resp, member_id: int):
 
 @app.post("/login")
 def login_submit(request: Request, email: str = Form(...), senha: str = Form(...)):
-    email = email.strip().lower()
-    chave_ip = f"login:{ip_cliente(request)}"
-    if auth.bloqueado_por(email) > 0 or auth.eventos_recentes(chave_ip, 900) >= LOGIN_FALHAS_POR_IP:
+    email = email.strip().lower()[:EMAIL_MAX]
+    ip = ip_cliente(request)
+    if auth.login_bloqueado(email, ip):
         return RedirectResponse("/login?erro=bloqueado", status_code=303)
     with db.session() as conn:
         row = conn.execute("SELECT * FROM members WHERE email=?", (email,)).fetchone()
-    if not row or not auth.verificar_senha(senha, row["password_hash"]):
-        auth.registrar_erro(email)
-        auth.registrar_evento(chave_ip)
+    # Sempre calcula um hash, mesmo sem conta: o tempo de resposta não revela quais e-mails existem.
+    confere = auth.verificar_senha(senha, (row["password_hash"] if row else None) or auth.hash_falso())
+    if not row or not confere:
+        auth.login_falhou(email, ip)
         return RedirectResponse(f"/login?erro=1&email={quote(email)}", status_code=303)
     if row["status"] != "ativo":
         return RedirectResponse("/login?erro=pendente", status_code=303)
-    auth.registrar_acerto(email)
-    return sessao_cookie(RedirectResponse("/", status_code=303), row["id"])
+    auth.login_ok(email, ip)
+    if auth.precisa_rehash(row["password_hash"]):   # hash antigo (menos iterações): atualiza agora que temos a senha
+        with db.session() as conn:
+            conn.execute("UPDATE members SET password_hash=? WHERE id=?", (auth.hash_senha(senha), row["id"]))
+    return sessao_cookie(RedirectResponse("/", status_code=303), row["id"], row["session_version"])
 
 
 @app.get("/logout")
@@ -270,47 +296,66 @@ def logout():
     return resp
 
 
+def convite_valido(codigo: str) -> bool:
+    return bool(CADASTRO_CODIGO) and hmac.compare_digest(codigo.encode("utf-8"), CADASTRO_CODIGO.encode("utf-8"))
+
+
+def pagina_cadastro(request: Request, aberto: bool, convite: str = "", status: int = 200, **extra):
+    return templates.TemplateResponse(request, "cadastro.html", {
+        "aberto": aberto, "convite": convite if aberto else "",
+        "erro_msg": extra.get("erro_msg"), "nome": extra.get("nome", ""), "email": extra.get("email", ""),
+        "senha_min": auth.SENHA_MIN,
+    }, status_code=status)
+
+
 @app.get("/cadastro", response_class=HTMLResponse)
 def cadastro_form(request: Request):
     if auth.current_member(request):
         return RedirectResponse("/")
-    return templates.TemplateResponse(request, "cadastro.html", {
-        "erro_msg": request.query_params.get("erro"),
-        "nome": request.query_params.get("nome", ""),
-        "email": request.query_params.get("email", ""),
-        "senha_min": auth.SENHA_MIN,
-    })
+    codigo = request.query_params.get("c", "")
+    aberto = convite_valido(codigo)
+    return pagina_cadastro(request, aberto, codigo,
+                           erro_msg=request.query_params.get("erro") if aberto else None,
+                           nome=request.query_params.get("nome", ""), email=request.query_params.get("email", ""))
 
 
 @app.post("/cadastro")
 def cadastro_submit(request: Request, nome: str = Form(...), email: str = Form(...), senha: str = Form(...),
-                    senha2: str = Form(...), site: str = Form("")):
+                    senha2: str = Form(...), site: str = Form(""), convite: str = Form("")):
     nome, email = nome.strip()[:60], email.strip().lower()
     if site.strip():   # campo isca, invisível para pessoas: só robôs preenchem. Finge sucesso e não cria nada.
         return RedirectResponse("/login?ok=cadastro", status_code=303)
+    ip = ip_cliente(request)
+    if not convite_valido(convite):
+        auth.registrar_evento(f"convite:{ip}")   # quem chuta códigos é freado (a resposta é a mesma de sempre)
+        return pagina_cadastro(request, False, status=403)
+    if auth.eventos_recentes(f"convite:{ip}", 3600) >= CONVITE_ERROS_POR_IP:
+        return pagina_cadastro(request, False, status=403)
 
     def volta(msg: str):
-        return RedirectResponse(f"/cadastro?erro={quote(msg)}&nome={quote(nome)}&email={quote(email)}", status_code=303)
+        return RedirectResponse(f"/cadastro?c={quote(convite)}&erro={quote(msg)}&nome={quote(nome)}&email={quote(email)}", status_code=303)
 
     if len(nome) < 2:
         return volta("Digite seu nome.")
     if len(email) > EMAIL_MAX or not EMAIL_RE.match(email):
         return volta("E-mail inválido.")
-    if len(senha) < auth.SENHA_MIN:
-        return volta(f"A senha precisa ter pelo menos {auth.SENHA_MIN} caracteres.")
+    erro_senha = auth.validar_senha(senha)
+    if erro_senha:
+        return volta(erro_senha)
     if senha != senha2:
         return volta("As duas senhas não são iguais.")
-    if not auth.permitir(f"cadastro:{ip_cliente(request)}", CADASTRO_POR_IP, 3600):
+    if not auth.permitir(f"cadastro:{ip}", CADASTRO_POR_IP, 3600):
         return volta("Muitas inscrições deste endereço. Tente de novo mais tarde.")
+    novo_hash = auth.hash_senha(senha)    # sempre calcula, exista ou não a conta: mesmo tempo de resposta
     with db.session() as conn:
         pendentes = conn.execute("SELECT COUNT(*) FROM members WHERE status='pendente'").fetchone()[0]
         if pendentes >= CADASTRO_PENDENTES_MAX:
             return volta("As inscrições estão temporariamente fechadas. Fale com o administrador.")
         if conn.execute("SELECT 1 FROM members WHERE email=?", (email,)).fetchone():
-            return volta("Já existe uma conta com esse e-mail. Use 'Recuperar senha' se precisar.")
+            return RedirectResponse("/login?ok=cadastro", status_code=303)   # resposta neutra: não revela que a conta existe
         conn.execute(
             "INSERT INTO members (name, email, password_hash, pin, is_admin, status, created_at) VALUES (?,?,?,'',0,'pendente',?)",
-            (nome, email, auth.hash_senha(senha), agora()),
+            (nome, email, novo_hash, agora()),
         )
         admins = [r["email"] for r in conn.execute(
             "SELECT email FROM members WHERE is_admin=1 AND email IS NOT NULL").fetchall()]
@@ -350,20 +395,20 @@ def mascarar_email(email: str) -> str:
 
 @app.get("/esqueci/enviado", response_class=HTMLResponse)
 def esqueci_enviado(request: Request):
-    return templates.TemplateResponse(request, "esqueci_enviado.html", {
-        "mascarado": mascarar_email(request.query_params.get("e", "seu e-mail")),
-    })
+    # Recebe o e-mail JÁ mascarado (a***@dominio.com); aceita só caracteres de e-mail, para não exibir texto livre.
+    recebido = re.sub(r"[^A-Za-z0-9*@._+\-]", "", request.query_params.get("e", ""))[:80]
+    return templates.TemplateResponse(request, "esqueci_enviado.html", {"mascarado": recebido or "o seu e-mail"})
 
 
 @app.post("/esqueci")
-def esqueci_enviar(request: Request, email: str = Form(...)):
+def esqueci_enviar(request: Request, background: BackgroundTasks, email: str = Form(...)):
     email = email.strip().lower()
     if not mailer.email_habilitado():
         return RedirectResponse(f"/esqueci?erro={quote('Envio de e-mail não está configurado. Fale com o administrador.')}", status_code=303)
     # Resposta é a mesma exista a conta ou não (não revela quem está cadastrado).
     if len(email) > EMAIL_MAX or not EMAIL_RE.match(email):
         return RedirectResponse(f"/esqueci?erro={quote('Digite um e-mail válido.')}&email={quote(email[:EMAIL_MAX])}", status_code=303)
-    enviado = RedirectResponse(f"/esqueci/enviado?e={quote(email)}", status_code=303)
+    enviado = RedirectResponse(f"/esqueci/enviado?e={quote(mascarar_email(email))}", status_code=303)
     if not auth.permitir(f"esqueci:{ip_cliente(request)}", ESQUECI_POR_IP, 3600):
         return enviado   # mesma resposta de sempre: não revela que o limite foi atingido
     with db.session() as conn:
@@ -388,7 +433,8 @@ def esqueci_enviar(request: Request, email: str = Form(...)):
     html = (f"<p>Olá, {esc(primeiro_nome(row['name']))}.</p><p>Para criar uma nova senha no {APP_NOME}, toque no botão "
             f"abaixo (vale por 30 minutos):</p><p>{botao_email(link, 'Criar nova senha')}</p>"
             f'<p style="color:#666;font-size:13px">Se não foi você que pediu, ignore este e-mail.<br>Link: {esc(link)}</p>')
-    enviar_email_silencioso(row["email"], f"Sua nova senha no {APP_NOME}", texto, html)
+    # Envio em segundo plano: a resposta sai logo, com ou sem conta, e o tempo não revela quem tem cadastro.
+    background.add_task(enviar_email_silencioso, row["email"], f"Sua nova senha no {APP_NOME}", texto, html)
     return enviado
 
 
@@ -419,23 +465,57 @@ def redefinir_form(request: Request, token: str):
     })
 
 
+def trocar_senha(conn, member_id: int, senha: str) -> int:
+    """Grava a senha nova, derruba as sessões antigas e invalida os links de recuperação pendentes.
+    Devolve a nova versão de sessão."""
+    conn.execute("UPDATE members SET password_hash=?, session_version=session_version+1 WHERE id=?",
+                 (auth.hash_senha(senha), member_id))
+    conn.execute("UPDATE pin_resets SET used_at=? WHERE member_id=? AND used_at IS NULL", (agora(), member_id))
+    return conn.execute("SELECT session_version FROM members WHERE id=?", (member_id,)).fetchone()[0]
+
+
 @app.post("/redefinir/{token}")
 def redefinir_salvar(request: Request, token: str, senha: str = Form(...), senha2: str = Form(...)):
-    if len(senha) < auth.SENHA_MIN:
-        return RedirectResponse(f"/redefinir/{token}?erro={quote(f'A senha precisa ter pelo menos {auth.SENHA_MIN} caracteres.')}", status_code=303)
-    if senha != senha2:
-        return RedirectResponse(f"/redefinir/{token}?erro={quote('As duas senhas não são iguais.')}", status_code=303)
+    erro = auth.validar_senha(senha) or (None if senha == senha2 else "As duas senhas não são iguais.")
+    if erro:
+        return RedirectResponse(f"/redefinir/{token}?erro={quote(erro)}", status_code=303)
     with db.session() as conn:
         reset = _reset_valido(conn, token)
         if not reset:
             return pagina_erro(request, 400, *LINK_VENCIDO)
-        conn.execute("UPDATE members SET password_hash=? WHERE id=?", (auth.hash_senha(senha), reset["member_id"]))
-        conn.execute("UPDATE pin_resets SET used_at=? WHERE id=?", (agora(), reset["id"]))
+        versao = trocar_senha(conn, reset["member_id"], senha)
         membro = conn.execute("SELECT id, email FROM members WHERE id=?", (reset["member_id"],)).fetchone()
     if membro["email"]:
-        auth.registrar_acerto(membro["email"])
+        auth.limpar_login(membro["email"])
     # Quem abriu o link do e-mail já provou que é dono da conta: entra direto, sem digitar de novo.
-    return sessao_cookie(RedirectResponse("/", status_code=303), membro["id"])
+    return sessao_cookie(RedirectResponse("/", status_code=303), membro["id"], versao)
+
+
+@app.get("/conta/senha", response_class=HTMLResponse)
+def conta_senha_form(request: Request):
+    auth.require_member(request)
+    return templates.TemplateResponse(request, "conta_senha.html", {"senha_min": auth.SENHA_MIN, "erro_msg": None, "ok": False})
+
+
+@app.post("/conta/senha", response_class=HTMLResponse)
+def conta_senha_salvar(request: Request, atual: str = Form(...), senha: str = Form(...), senha2: str = Form(...)):
+    member = auth.require_member(request)
+
+    def tela(erro=None, ok=False, status=200):
+        return templates.TemplateResponse(request, "conta_senha.html",
+                                          {"senha_min": auth.SENHA_MIN, "erro_msg": erro, "ok": ok}, status_code=status)
+
+    if not auth.permitir(f"conta:{member['id']}", 5, 900):
+        return tela("Muitas tentativas. Espere alguns minutos.", status=429)
+    if not auth.verificar_senha(atual, member["password_hash"]):
+        return tela("A senha atual não confere.", status=400)
+    erro = auth.validar_senha(senha) or (None if senha == senha2 else "As duas senhas não são iguais.")
+    if erro:
+        return tela(erro, status=400)
+    with db.session() as conn:
+        versao = trocar_senha(conn, member["id"], senha)
+    resp = tela(ok=True)
+    return sessao_cookie(resp, member["id"], versao)   # esta sessão continua valendo; as outras caem
 
 
 # ---------- Início ----------
@@ -621,9 +701,10 @@ def responder_quiz(request: Request, slug: str, question_id: str = Form(...),
     is_correct = escolha == pergunta["correta"]
     with db.session() as conn:
         conn.execute(
-            """INSERT OR REPLACE INTO quiz_answers
+            """INSERT INTO quiz_answers
                (member_id, devotional_slug, question_id, chosen, is_correct, answered_at)
-               VALUES (?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?)
+               ON CONFLICT(member_id, devotional_slug, question_id) DO NOTHING""",   # a primeira resposta vale; reenviar não troca
             (member["id"], slug, question_id, escolha, int(is_correct), agora()),
         )
         respondidas = {
@@ -825,6 +906,7 @@ def admin_membros(request: Request):
     ativos = [dict(r) for r in rows if r["status"] == "ativo"]
     return templates.TemplateResponse(request, "admin_membros.html", {
         "pendentes": pendentes, "ativos": ativos, "me": me,
+        "convite_link": (f"{PUBLIC_URL or str(request.base_url).rstrip('/')}/cadastro?c={quote(CADASTRO_CODIGO)}" if CADASTRO_CODIGO else ""),
         "ok_msg": request.query_params.get("ok"),
         "erro_msg": request.query_params.get("erro"),
         "senha_min": auth.SENHA_MIN,
@@ -870,14 +952,15 @@ def admin_membro_excluir(request: Request, member_id: int):
 @app.post("/admin/membros/{member_id}/senha")
 def admin_membro_senha(request: Request, member_id: int, senha: str = Form(...)):
     auth.require_admin(request)
-    if len(senha) < auth.SENHA_MIN:
-        return _volta_membros("erro", f"A senha precisa ter pelo menos {auth.SENHA_MIN} caracteres.")
+    erro = auth.validar_senha(senha)
+    if erro:
+        return _volta_membros("erro", erro)
     with db.session() as conn:
         row = _membro_ou_404(conn, member_id)
-        conn.execute("UPDATE members SET password_hash=? WHERE id=?", (auth.hash_senha(senha), member_id))
+        trocar_senha(conn, member_id, senha)
     if row["email"]:
-        auth.registrar_acerto(row["email"])
-    return _volta_membros("ok", f"Senha de {row['name']} redefinida.")
+        auth.limpar_login(row["email"])
+    return _volta_membros("ok", f"Senha de {row['name']} redefinida. As sessões abertas dessa pessoa foram encerradas.")
 
 
 # ---------- Admin: coleções ----------

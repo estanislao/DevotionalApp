@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Trocar senha{% endblock %}
+{% block content %}
+<div class="main" style="padding-top:28px">
+  <div class="topbar" style="padding:0">
+    <a href="/" class="icon-btn" aria-label="Voltar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></a>
+    <h1 style="margin:0; font-size:22px; font-weight:700">Trocar senha</h1>
+    <span style="width:44px"></span>
+  </div>
+  {% if ok %}<div class="explicacao"><span class="ok">Senha trocada.</span><p style="margin:0; font-size:14px; color:var(--text-soft)">Os outros aparelhos em que você estava logado foram desconectados.</p></div>{% endif %}
+  {% if erro_msg %}<p class="erro">{{ erro_msg }}</p>{% endif %}
+  <form method="post" action="/conta/senha" class="cartao">
+    <div class="campo"><label for="atual">Senha atual</label><input id="atual" name="atual" type="password" required autocomplete="current-password"></div>
+    <div class="campo"><label for="senha">Senha nova (mínimo {{ senha_min }} caracteres)</label><input id="senha" name="senha" type="password" required minlength="{{ senha_min }}" autocomplete="new-password"></div>
+    <div class="campo"><label for="senha2">Repita a senha nova</label><input id="senha2" name="senha2" type="password" required minlength="{{ senha_min }}" autocomplete="new-password"></div>
+    <button type="submit" class="btn-primary">Salvar senha nova</button>
+  </form>
+</div>
+{% endblock %}

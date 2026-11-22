@@ -379,3 +379,7 @@ audio.player-nativo { width: 100%; }
 
 /* Campo isca do cadastro: fora da tela, só robôs preenchem */
 .isca { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+
+/* Linha "campo + botão" no painel do admin (nova senha + Redefinir): o campo ocupa o espaço, o botão se ajusta ao texto */
+form.acoes > input[type=password] { flex: 1 1 auto; min-width: 0; }
+form.acoes > button { width: auto; flex: 0 0 auto; padding: 0 18px; }

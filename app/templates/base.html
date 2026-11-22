@@ -11,7 +11,7 @@
 <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
 <meta name="apple-mobile-web-app-title" content="Trilha de Fé">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Newsreader:ital,wght@0,400;0,500;1,400&display=swap">
-<link rel="stylesheet" href="/static/css/style.css?v=6">
+<link rel="stylesheet" href="/static/css/style.css?v=8">
 </head>
 <body>
 <div class="app {% block app_class %}{% endblock %}">
@@ -27,14 +27,14 @@ if ('serviceWorker' in navigator) {
 document.querySelectorAll('form').forEach((form) => {
   const campos = form.querySelectorAll('input[type=password]');
   if (!campos.length) return;
-  const alvo = campos[campos.length - 1].closest('.campo') || campos[campos.length - 1];
+  const campo = campos[campos.length - 1].closest('.campo');   // fora de um .campo (ex.: linha em flex), o rótulo vai depois do formulário
   const rotulo = document.createElement('label');
   rotulo.className = 'mostrar-senha';
   rotulo.innerHTML = '<input type="checkbox"> Mostrar senha';
   rotulo.querySelector('input').addEventListener('change', (e) => {
     campos.forEach((c) => { c.type = e.target.checked ? 'text' : 'password'; });
   });
-  alvo.after(rotulo);
+  if (campo) campo.after(rotulo); else form.after(rotulo);
 });
 </script>
 </body>

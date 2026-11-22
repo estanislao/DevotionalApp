@@ -96,11 +96,12 @@ Para rodar na hora: `sudo /usr/local/bin/portal-backup.sh`. **Esses arquivos fic
 
 ### Contas, aprovação e senhas
 
-- **Cadastro**: qualquer pessoa com o link cria conta em `/cadastro` (nome, e-mail, senha). A conta nasce *pendente* e não consegue entrar até você aprovar.
+- **Cadastro por convite**: sem `CADASTRO_CODIGO` no `.env`, as inscrições ficam **fechadas**. Com o código, o admin vê o link pronto (`/cadastro?c=CÓDIGO`) em `/admin/membros` e o envia a quem quiser convidar. A pessoa informa nome, e-mail e senha, e a conta nasce *pendente*: só entra depois que você aprovar. Trocar o código invalida os links antigos.
+- **Senhas**: mínimo de 8 caracteres e sem as senhas mais comuns; hash PBKDF2 com 600 mil iterações (hashes antigos sobem sozinhos no próximo login). Quem está logado troca a própria senha no ícone de chave do início. Trocar ou redefinir a senha **derruba as sessões abertas** e invalida os links de recuperação pendentes.
 - **Aprovar, recusar, excluir, redefinir senha**: tudo em `/admin/membros`. O admin não consegue excluir a própria conta. Se o e-mail estiver configurado, você recebe um aviso a cada inscrição nova e a pessoa recebe um aviso ao ser aprovada.
 - **Esqueci minha senha**: com `BREVO_API_KEY` e `MAIL_FROM` no `.env`, a tela de login mostra o link. A pessoa digita o e-mail e recebe um link de 30 minutos (um a cada 5 minutos) para criar senha nova. A resposta é a mesma exista a conta ou não.
 - **Coleções**: criadas e editadas só pelo admin em `/admin/colecoes` (nome e descrição). Não dá para excluir coleção que ainda tem devocionais. No início, a aba Coleções lista todas e a aba Últimas mostra as 10 mais recentes.
-- **Força bruta**: 5 senhas erradas seguidas bloqueiam o e-mail por 15 minutos (contador em memória, zera ao reiniciar).
+- **Força bruta**: 5 senhas erradas do mesmo e-mail **vindas do mesmo IP** bloqueiam esse par por 15 minutos; há ainda teto de 20 erros por IP e de 100 por hora por e-mail. Os contadores ficam no banco e sobrevivem a reinícios.
 
 ## Testes
 
@@ -108,6 +109,8 @@ Para rodar na hora: `sudo /usr/local/bin/portal-backup.sh`. **Esses arquivos fic
 pip install -r requirements-dev.txt
 pytest
 ```
+
+O GitHub roda a mesma suíte a cada `push` (`.github/workflows/tests.yml`).
 
 Os testes usam um banco e uma pasta de devocionais temporários; não tocam em dados reais.
 

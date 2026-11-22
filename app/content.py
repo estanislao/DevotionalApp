@@ -102,8 +102,13 @@ def validar_quiz(raw: bytes) -> list[dict]:
         for campo in ("id", "pergunta", "opcoes", "correta"):
             if campo not in p:
                 raise ValueError(f"Pergunta {i} está sem o campo '{campo}'.")
+        for campo in ("id", "pergunta", "correta"):
+            if not isinstance(p[campo], str) or not p[campo].strip():
+                raise ValueError(f"Pergunta {i}: '{campo}' precisa ser um texto (entre aspas), não número nem vazio.")
         if not isinstance(p["opcoes"], list) or len(p["opcoes"]) < 2:
             raise ValueError(f"Pergunta {i} precisa de pelo menos 2 opções.")
+        if not all(isinstance(o, str) and o.strip() for o in p["opcoes"]):
+            raise ValueError(f"Pergunta {i}: todas as opções precisam ser textos (entre aspas).")
         if p["correta"] not in p["opcoes"]:
             raise ValueError(f"Pergunta {i}: 'correta' não está entre as opções.")
         if not re.fullmatch(r"[A-Za-z0-9_-]+", str(p["id"])):

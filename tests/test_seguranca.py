@@ -1,12 +1,12 @@
 import pytest
-from tests.conftest import entrar, cadastrar_e_aprovar
+from tests.conftest import entrar, cadastro, cadastrar_e_aprovar, novo_cliente
 
 SLUG = "2026-11-22-teste"
 PROTEGIDAS = ["/", "/colecao/1", f"/d/{SLUG}", f"/d/{SLUG}/ler", f"/d/{SLUG}/slides", f"/d/{SLUG}/slide/1",
-              f"/d/{SLUG}/midia/audio.m4a", f"/d/{SLUG}/quiz", "/admin", "/admin/membros", "/admin/colecoes"]
+              f"/d/{SLUG}/midia/audio.m4a", f"/d/{SLUG}/quiz", "/admin", "/admin/membros", "/admin/colecoes", "/conta/senha"]
 
 
-# ---------- cabeçalhos (A-02) ----------
+# ---------- cabeçalhos ----------
 def test_cabecalhos_de_seguranca_em_todas_as_respostas(client):
     for caminho in ("/login", "/cadastro", "/nao-existe", "/static/css/style.css"):
         h = client.get(caminho).headers
@@ -37,7 +37,8 @@ def test_rotas_protegidas_redirecionam_para_login(client, rota):
 
 def test_acoes_que_gravam_exigem_login(client):
     for rota, dados in (("/partilhas", {"texto": "oi"}), ("/admin/colecoes", {"nome": "x"}), ("/admin/membros/1/aprovar", {}),
-                        (f"/d/{SLUG}/praticar/concluir", {})):
+                        (f"/d/{SLUG}/praticar/concluir", {}),
+                        ("/conta/senha", {"atual": "x", "senha": "y", "senha2": "y"})):
         assert client.post(rota, data=dados).status_code == 303, rota
 
 
@@ -48,14 +49,21 @@ def test_membro_comum_nao_acessa_admin(app_mod, client):
         assert ana.get(rota).status_code == 403, rota
 
 
+def test_membro_comum_nao_apaga_partilha_de_outro(app_mod, client):
+    admin = entrar(client)
+    admin.post("/partilhas", data={"texto": "do admin"})
+    ana, _ = cadastrar_e_aprovar(app_mod, admin)
+    assert ana.post("/partilhas/1/excluir").status_code == 403
+
+
 def test_conta_pendente_nao_entra(client):
-    client.post("/cadastro", data={"nome": "Bia", "email": "bia@teste.com", "senha": "segredo123", "senha2": "segredo123"})
+    cadastro(client, "Bia", "bia@teste.com")
     r = client.post("/login", data={"email": "bia@teste.com", "senha": "segredo123"})
     assert r.headers["location"] == "/login?erro=pendente"
 
 
 # ---------- login ----------
-def test_login_senha_errada_e_bloqueio_por_email(client):
+def test_login_senha_errada_e_bloqueio_do_par_email_ip(client):
     for _ in range(5):
         assert client.post("/login", data={"email": "admin@teste.com", "senha": "errada"}).headers["location"].startswith("/login?erro=1")
     r = client.post("/login", data={"email": "admin@teste.com", "senha": "senha-admin-1"})
@@ -63,7 +71,7 @@ def test_login_senha_errada_e_bloqueio_por_email(client):
 
 
 def test_login_bloqueio_por_ip_com_emails_diferentes(app_mod, client):
-    for i in range(app_mod.LOGIN_FALHAS_POR_IP):
+    for i in range(app_mod.auth.LOGIN_IP_MAX):
         client.post("/login", data={"email": f"x{i}@teste.com", "senha": "errada"})
     r = client.post("/login", data={"email": "admin@teste.com", "senha": "senha-admin-1"})
     assert r.headers["location"] == "/login?erro=bloqueado"
@@ -72,7 +80,7 @@ def test_login_bloqueio_por_ip_com_emails_diferentes(app_mod, client):
 # ---------- cadastro (A-03) ----------
 def test_cadastro_isca_nao_cria_conta(client):
     from app import db
-    r = client.post("/cadastro", data={"nome": "Robo", "email": "robo@teste.com", "senha": "segredo123", "senha2": "segredo123", "site": "http://spam"})
+    r = cadastro(client, "Robo", "robo@teste.com", site="http://spam")
     assert r.headers["location"] == "/login?ok=cadastro"   # finge sucesso
     with db.session() as c:
         assert c.execute("SELECT COUNT(*) FROM members WHERE email='robo@teste.com'").fetchone()[0] == 0
@@ -80,30 +88,31 @@ def test_cadastro_isca_nao_cria_conta(client):
 
 def test_cadastro_limite_por_ip(app_mod, client):
     for i in range(app_mod.CADASTRO_POR_IP):
-        r = client.post("/cadastro", data={"nome": f"P{i}", "email": f"p{i}@teste.com", "senha": "segredo123", "senha2": "segredo123"})
-        assert r.headers["location"] == "/login?ok=cadastro"
-    r = client.post("/cadastro", data={"nome": "Extra", "email": "extra@teste.com", "senha": "segredo123", "senha2": "segredo123"})
-    assert "Muitas+inscri" in r.headers["location"] or "Muitas%20inscri" in r.headers["location"]
+        assert cadastro(client, f"P{i}", f"p{i}@teste.com").headers["location"] == "/login?ok=cadastro"
+    r = cadastro(client, "Extra", "extra@teste.com")
+    assert "Muitas%20inscri" in r.headers["location"]
 
 
 def test_cadastro_fecha_com_muitas_pendentes(app_mod, client, monkeypatch):
     monkeypatch.setattr(app_mod, "CADASTRO_PENDENTES_MAX", 2)
     monkeypatch.setattr(app_mod, "CADASTRO_POR_IP", 99)
     for i in range(2):
-        client.post("/cadastro", data={"nome": f"P{i}", "email": f"p{i}@teste.com", "senha": "segredo123", "senha2": "segredo123"})
-    r = client.post("/cadastro", data={"nome": "Zeca", "email": "z@teste.com", "senha": "segredo123", "senha2": "segredo123"})
-    assert "temporariamente" in r.headers["location"]
+        cadastro(client, f"P{i}", f"p{i}@teste.com")
+    assert "temporariamente" in cadastro(client, "Zeca", "z@teste.com").headers["location"]
 
 
-def test_cadastro_senha_curta_e_email_duplicado(client):
-    r = client.post("/cadastro", data={"nome": "Cid", "email": "cid@teste.com", "senha": "123", "senha2": "123"})
-    assert "pelo%20menos" in r.headers["location"]
-    ok = {"nome": "Cid", "email": "cid@teste.com", "senha": "segredo123", "senha2": "segredo123"}
-    assert client.post("/cadastro", data=ok).headers["location"] == "/login?ok=cadastro"
-    assert "J%C3%A1%20existe" in client.post("/cadastro", data=ok).headers["location"]
+def test_cadastro_senha_curta_comum_e_email_duplicado_neutro(client):
+    from app import db
+    assert "pelo%20menos" in cadastro(client, "Cid", "cid@teste.com", senha="123").headers["location"]
+    assert "muito%20comum" in cadastro(client, "Cid", "cid@teste.com", senha="12345678").headers["location"]
+    assert cadastro(client, "Cid", "cid@teste.com").headers["location"] == "/login?ok=cadastro"
+    # segundo cadastro com o mesmo e-mail: mesma resposta, nenhuma conta nova (não revela que existe)
+    assert cadastro(client, "Cid2", "cid@teste.com").headers["location"] == "/login?ok=cadastro"
+    with db.session() as c:
+        assert c.execute("SELECT COUNT(*) FROM members WHERE email='cid@teste.com'").fetchone()[0] == 1
 
 
-# ---------- recuperação (A-03/A-07) ----------
+# ---------- recuperação ----------
 def test_esqueci_responde_igual_para_email_existente_ou_nao(app_mod, client, monkeypatch):
     enviados = []
     monkeypatch.setattr(app_mod.mailer, "email_habilitado", lambda: True)
@@ -113,9 +122,10 @@ def test_esqueci_responde_igual_para_email_existente_ou_nao(app_mod, client, mon
     assert a.status_code == b.status_code == 303
     assert a.headers["location"].split("?")[0] == b.headers["location"].split("?")[0] == "/esqueci/enviado"
     assert enviados == ["admin@teste.com"]      # só a conta que existe recebe e-mail; a resposta na tela é a mesma
+    assert "admin@teste.com" not in a.headers["location"]   # o e-mail inteiro não vai para a URL (só a versão mascarada)
 
 
-# ---------- admin sem senha no .env (A-06) ----------
+# ---------- admin sem senha no .env ----------
 def test_boot_sem_admin_password_nao_falha(app_mod, monkeypatch):
     monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
     assert app_mod.ler_admin_env() is None

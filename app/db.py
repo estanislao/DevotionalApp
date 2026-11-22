@@ -15,8 +15,17 @@ CREATE TABLE IF NOT EXISTS members (
     pin TEXT,                        -- legado (primeira versão logava por PIN)
     is_admin INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'ativo',   -- pendente | ativo
+    session_version INTEGER NOT NULL DEFAULT 0,   -- sobe a cada troca de senha e derruba as sessões antigas
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS eventos (   -- contadores dos limites de uso (login, cadastro, recuperação)
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chave TEXT NOT NULL,
+    ts REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_eventos_chave_ts ON eventos(chave, ts);
+CREATE INDEX IF NOT EXISTS idx_eventos_ts ON eventos(ts);
 
 CREATE TABLE IF NOT EXISTS collections (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,6 +90,7 @@ MIGRACOES_MEMBERS = {
     "email": "ALTER TABLE members ADD COLUMN email TEXT",
     "password_hash": "ALTER TABLE members ADD COLUMN password_hash TEXT",
     "status": "ALTER TABLE members ADD COLUMN status TEXT NOT NULL DEFAULT 'ativo'",
+    "session_version": "ALTER TABLE members ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0",
 }
 
 
@@ -99,8 +109,9 @@ def get_conn() -> sqlite3.Connection:
 def init_db(admin: dict | None = None) -> None:
     """Cria tabelas, aplica migrações e garante a conta do administrador.
 
-    admin = {"name", "email", "password_hash"}; se já existir membro com esse
-    e-mail, nada é sobrescrito (a senha pode ter sido trocada pela interface).
+    admin = {"name", "email", "password_hash"}. O administrador só é CRIADO: se já existir membro com esse
+    e-mail (ativo, pendente ou de qualquer perfil), nada é alterado. Isso impede que alguém se cadastre
+    antes e vire admin com a própria senha quando o servidor reiniciar com aquele ADMIN_EMAIL.
     """
     conn = get_conn()
     conn.executescript(SCHEMA)
@@ -117,8 +128,6 @@ def init_db(admin: dict | None = None) -> None:
                 "INSERT INTO members (name, email, password_hash, pin, is_admin, status, created_at) VALUES (?,?,?,'',1,'ativo',?)",
                 (admin["name"], admin["email"], admin["password_hash"], agora()),
             )
-        else:
-            conn.execute("UPDATE members SET is_admin=1, status='ativo' WHERE id=?", (existing["id"],))
         conn.commit()
     conn.close()
 
