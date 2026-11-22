@@ -122,7 +122,8 @@ def test_csp_nao_aceita_nenhuma_origem_externa(client):
 @pytest.mark.parametrize("arquivo", FONTES)
 def test_fonte_e_servida_pelo_app_e_e_woff2_valido(client, arquivo):
     r = client.get(f"/static/fonts/{arquivo}")
-    assert r.status_code == 200 and "font" in r.headers["content-type"]
+    assert r.status_code == 200 and r.headers["content-type"] == "font/woff2"
+    assert "max-age=2592000" in r.headers["cache-control"]
     assert r.content[:4] == b"wOF2" and len(r.content) > 10_000
 
 

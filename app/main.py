@@ -14,6 +14,7 @@ Rotas principais:
 import os
 import re
 import hmac
+import mimetypes
 import shutil
 import html as _html
 import json
@@ -36,6 +37,10 @@ from fastapi.templating import Jinja2Templates
 from . import db, content, auth, mailer
 
 BASE_DIR = Path(__file__).parent
+
+# A imagem enxuta do Python não conhece estes tipos e serviria tudo como application/octet-stream.
+mimetypes.add_type("font/woff2", ".woff2")
+mimetypes.add_type("image/svg+xml", ".svg")
 DEVOCIONAIS_DIR = BASE_DIR.parent / "devocionais"
 
 # Limites de upload (bytes). Áudio de podcast de 30 min em 64 kbps ≈ 15 MB.
@@ -138,6 +143,8 @@ async def cabecalhos_de_seguranca(request: Request, call_next):
         resp = await call_next(request)
     for nome, valor in CABECALHOS.items():
         resp.headers.setdefault(nome, valor)
+    if request.url.path.startswith("/static/fonts/"):
+        resp.headers.setdefault("Cache-Control", "public, max-age=2592000")   # as fontes nunca mudam de conteúdo
     if auth.COOKIE_SECURE:   # HTTPS em produção; no teste local (http) o HSTS não se aplica
         resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
     return resp
