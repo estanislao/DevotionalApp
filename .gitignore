@@ -1,7 +1,8 @@
 app/data/
 app/__pycache__/
 **/__pycache__/
-.env
+.env*
+!.env.example
 *.pyc
 
 # zip original e artefatos locais

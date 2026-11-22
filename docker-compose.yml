@@ -2,6 +2,7 @@ services:
   app:
     build: .
     restart: unless-stopped
+    mem_limit: 768m
     environment:
       - SESSION_SECRET=${SESSION_SECRET}
       - ADMIN_EMAIL=${ADMIN_EMAIL:-}

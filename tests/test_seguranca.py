@@ -104,11 +104,15 @@ def test_cadastro_senha_curta_e_email_duplicado(client):
 
 
 # ---------- recuperação (A-03/A-07) ----------
-def test_esqueci_responde_igual_para_email_existente_ou_nao(client):
+def test_esqueci_responde_igual_para_email_existente_ou_nao(app_mod, client, monkeypatch):
+    enviados = []
+    monkeypatch.setattr(app_mod.mailer, "email_habilitado", lambda: True)
+    monkeypatch.setattr(app_mod.mailer, "enviar", lambda para, assunto, texto, html: enviados.append(para))
     a = client.post("/esqueci", data={"email": "admin@teste.com"})
     b = client.post("/esqueci", data={"email": "ninguem@teste.com"})
     assert a.status_code == b.status_code == 303
-    assert a.headers["location"].startswith("/esqueci") and b.headers["location"].startswith("/esqueci")
+    assert a.headers["location"].split("?")[0] == b.headers["location"].split("?")[0] == "/esqueci/enviado"
+    assert enviados == ["admin@teste.com"]      # só a conta que existe recebe e-mail; a resposta na tela é a mesma
 
 
 # ---------- admin sem senha no .env (A-06) ----------

@@ -23,7 +23,7 @@
     </div>
     <div class="acoes">
       <form method="post" action="/admin/membros/{{ m['id'] }}/aprovar"><button type="submit" class="btn-primary" style="height:44px">Aprovar</button></form>
-      <form method="post" action="/admin/membros/{{ m['id'] }}/excluir" onsubmit="return confirm('Recusar e apagar a inscrição de {{ m['name'] }}?')"><button type="submit" class="btn-danger">Recusar</button></form>
+      <form method="post" action="/admin/membros/{{ m['id'] }}/excluir" data-msg="Recusar e apagar a inscrição de {{ m['name'] }}?" onsubmit="return confirm(this.dataset.msg)"><button type="submit" class="btn-danger">Recusar</button></form>
     </div>
   </div>
   {% else %}
@@ -45,7 +45,7 @@
       <button type="submit" class="btn-secondary">Redefinir</button>
     </form>
     {% if m['id'] != me['id'] %}
-    <form method="post" action="/admin/membros/{{ m['id'] }}/excluir" onsubmit="return confirm('Excluir {{ m['name'] }} e todo o progresso dessa pessoa? Não dá para desfazer.')">
+    <form method="post" action="/admin/membros/{{ m['id'] }}/excluir" data-msg="Excluir {{ m['name'] }} e todo o progresso dessa pessoa? Não dá para desfazer." onsubmit="return confirm(this.dataset.msg)">
       <button type="submit" class="btn-danger" style="width:100%">Excluir membro</button>
     </form>
     {% endif %}

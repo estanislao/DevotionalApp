@@ -13,6 +13,7 @@ Rotas principais:
 """
 import os
 import re
+import html as _html
 import json
 import unicodedata
 import secrets
@@ -24,7 +25,7 @@ from urllib.parse import quote
 
 from fastapi import FastAPI, Request, Form, UploadFile, File, HTTPException
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from fastapi.templating import Jinja2Templates
@@ -42,12 +43,15 @@ EXT_AUDIO = {".mp3", ".m4a", ".aac", ".ogg", ".wav"}
 EXT_PDF = {".pdf"}
 TIPOS_MIDIA = {".m4a": "audio/mp4", ".mp3": "audio/mpeg", ".aac": "audio/aac", ".ogg": "audio/ogg",
                ".wav": "audio/wav", ".pdf": "application/pdf"}
-EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}$")
+EMAIL_MAX = 254
 RESET_VALIDADE = timedelta(minutes=30)
 RESET_INTERVALO = timedelta(minutes=5)   # um e-mail por conta a cada 5 min
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
 APP_NOME = "Trilha de Fé"
 PARTILHA_MAX = 280
+CORPO_MAX_PADRAO = 1 * 1024 * 1024            # 1 MB em qualquer rota
+CORPO_MAX_PUBLICAR = 260 * 1024 * 1024       # só /admin/publicar aceita arquivos grandes
 # Limites contra abuso (por IP; contadores em memória, zeram ao reiniciar)
 CADASTRO_POR_IP = 5            # inscrições por hora
 CADASTRO_PENDENTES_MAX = 100   # acima disso, inscrições ficam fechadas até o admin limpar a fila
@@ -102,7 +106,12 @@ templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 @app.middleware("http")
 async def cabecalhos_de_seguranca(request: Request, call_next):
-    resp = await call_next(request)
+    tamanho = request.headers.get("content-length", "")
+    limite = CORPO_MAX_PUBLICAR if request.url.path == "/admin/publicar" else CORPO_MAX_PADRAO
+    if request.method in ("POST", "PUT", "PATCH") and tamanho.isdigit() and int(tamanho) > limite:
+        resp = Response("Corpo da requisição grande demais.", status_code=413, media_type="text/plain; charset=utf-8")
+    else:
+        resp = await call_next(request)
     for nome, valor in CABECALHOS.items():
         resp.headers.setdefault(nome, valor)
     if auth.COOKIE_SECURE:   # HTTPS em produção; no teste local (http) o HSTS não se aplica
@@ -190,9 +199,14 @@ def enviar_email_silencioso(para: str, assunto: str, texto: str, html: str) -> N
         print(f"[email] FALHA para {para}: {e}", flush=True)
 
 
+def esc(valor: str) -> str:
+    """Escapa texto vindo do usuário antes de entrar num e-mail em HTML."""
+    return _html.escape(str(valor), quote=True)
+
+
 def botao_email(link: str, rotulo: str) -> str:
-    return (f'<a href="{link}" style="display:inline-block;padding:12px 20px;background:#2E3192;color:#fff;'
-            f'border-radius:10px;text-decoration:none;font-weight:600">{rotulo}</a>')
+    return (f'<a href="{esc(link)}" style="display:inline-block;padding:12px 20px;background:#2E3192;color:#fff;'
+            f'border-radius:10px;text-decoration:none;font-weight:600">{esc(rotulo)}</a>')
 
 
 # ---------- Login / cadastro / logout ----------
@@ -280,7 +294,7 @@ def cadastro_submit(request: Request, nome: str = Form(...), email: str = Form(.
 
     if len(nome) < 2:
         return volta("Digite seu nome.")
-    if not EMAIL_RE.match(email):
+    if len(email) > EMAIL_MAX or not EMAIL_RE.match(email):
         return volta("E-mail inválido.")
     if len(senha) < auth.SENHA_MIN:
         return volta(f"A senha precisa ter pelo menos {auth.SENHA_MIN} caracteres.")
@@ -306,7 +320,7 @@ def cadastro_submit(request: Request, nome: str = Form(...), email: str = Form(.
             enviar_email_silencioso(
                 adm, f"{APP_NOME}: nova inscrição de {nome}",
                 f"{nome} ({email}) pediu para entrar no {APP_NOME}.\n\nAprove ou recuse em: {link}",
-                f"<p><strong>{nome}</strong> ({email}) pediu para entrar no {APP_NOME}.</p>"
+                f"<p><strong>{esc(nome)}</strong> ({esc(email)}) pediu para entrar no {APP_NOME}.</p>"
                 f"<p>{botao_email(link, 'Ver inscrições')}</p>",
             )
     return RedirectResponse("/login?ok=cadastro", status_code=303)
@@ -347,8 +361,8 @@ def esqueci_enviar(request: Request, email: str = Form(...)):
     if not mailer.email_habilitado():
         return RedirectResponse(f"/esqueci?erro={quote('Envio de e-mail não está configurado. Fale com o administrador.')}", status_code=303)
     # Resposta é a mesma exista a conta ou não (não revela quem está cadastrado).
-    if not EMAIL_RE.match(email):
-        return RedirectResponse(f"/esqueci?erro={quote('Digite um e-mail válido.')}&email={quote(email)}", status_code=303)
+    if len(email) > EMAIL_MAX or not EMAIL_RE.match(email):
+        return RedirectResponse(f"/esqueci?erro={quote('Digite um e-mail válido.')}&email={quote(email[:EMAIL_MAX])}", status_code=303)
     enviado = RedirectResponse(f"/esqueci/enviado?e={quote(email)}", status_code=303)
     if not auth.permitir(f"esqueci:{ip_cliente(request)}", ESQUECI_POR_IP, 3600):
         return enviado   # mesma resposta de sempre: não revela que o limite foi atingido
@@ -371,9 +385,9 @@ def esqueci_enviar(request: Request, email: str = Form(...)):
     link = f"{base}/redefinir/{token}"
     texto = (f"Olá, {primeiro_nome(row['name'])}.\n\nPara criar uma nova senha no {APP_NOME}, abra este link "
              f"(vale por 30 minutos):\n\n{link}\n\nSe não foi você que pediu, ignore este e-mail.")
-    html = (f"<p>Olá, {primeiro_nome(row['name'])}.</p><p>Para criar uma nova senha no {APP_NOME}, toque no botão "
+    html = (f"<p>Olá, {esc(primeiro_nome(row['name']))}.</p><p>Para criar uma nova senha no {APP_NOME}, toque no botão "
             f"abaixo (vale por 30 minutos):</p><p>{botao_email(link, 'Criar nova senha')}</p>"
-            f'<p style="color:#666;font-size:13px">Se não foi você que pediu, ignore este e-mail.<br>Link: {link}</p>')
+            f'<p style="color:#666;font-size:13px">Se não foi você que pediu, ignore este e-mail.<br>Link: {esc(link)}</p>')
     enviar_email_silencioso(row["email"], f"Sua nova senha no {APP_NOME}", texto, html)
     return enviado
 
@@ -835,7 +849,7 @@ def admin_membro_aprovar(request: Request, member_id: int):
         enviar_email_silencioso(
             row["email"], f"Sua inscrição no {APP_NOME} foi aprovada",
             f"Olá, {primeiro_nome(row['name'])}.\n\nSua inscrição foi aprovada. Entre em: {link}",
-            f"<p>Olá, {primeiro_nome(row['name'])}.</p><p>Sua inscrição foi aprovada.</p><p>{botao_email(link, 'Entrar')}</p>",
+            f"<p>Olá, {esc(primeiro_nome(row['name']))}.</p><p>Sua inscrição foi aprovada.</p><p>{botao_email(link, 'Entrar')}</p>",
         )
     return _volta_membros("ok", f"{row['name']} aprovado. Já pode entrar.")
 
