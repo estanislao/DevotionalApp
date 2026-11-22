@@ -1,6 +1,6 @@
 {
-  "name": "Portal de Devocionais",
-  "short_name": "Devocional",
+  "name": "Trilha de Fé",
+  "short_name": "Trilha de Fé",
   "description": "Devocionais em família — ouvir, ler, slides, quiz e lições práticas.",
   "start_url": "/",
   "display": "standalone",

@@ -43,7 +43,7 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 RESET_VALIDADE = timedelta(minutes=30)
 RESET_INTERVALO = timedelta(minutes=5)   # um e-mail por conta a cada 5 min
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
-APP_NOME = "Portal de Devocionais"
+APP_NOME = "Trilha de Fé"
 
 
 def agora() -> str:
@@ -303,7 +303,7 @@ def esqueci_enviar(request: Request, email: str = Form(...)):
     html = (f"<p>Olá, {primeiro_nome(row['name'])}.</p><p>Para criar uma nova senha no {APP_NOME}, toque no botão "
             f"abaixo (vale por 30 minutos):</p><p>{botao_email(link, 'Criar nova senha')}</p>"
             f'<p style="color:#666;font-size:13px">Se não foi você que pediu, ignore este e-mail.<br>Link: {link}</p>')
-    enviar_email_silencioso(row["email"], "Sua nova senha no Portal de Devocionais", texto, html)
+    enviar_email_silencioso(row["email"], f"Sua nova senha no {APP_NOME}", texto, html)
     return enviado
 
 

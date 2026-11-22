@@ -291,3 +291,11 @@ audio.player-nativo { width: 100%; }
   font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; padding: 0 14px;
 }
 .btn-danger[disabled] { opacity: .4; cursor: not-allowed; }
+
+/* Marca (login) */
+.marca { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; margin-bottom: 8px; }
+.marca-logo { width: 190px; height: auto; margin-bottom: 14px; }
+.marca-nome { margin: 0; font-size: 34px; font-weight: 700; letter-spacing: -0.5px; }
+.marca-sub { margin: 0; font-family: 'Newsreader', serif; font-style: italic; font-size: 19px; color: var(--text-soft); }
+.campo input::placeholder { color: #9AA0B8; }
+.login-rodape { margin-top: auto; padding-top: 40px; text-align: center; font-size: 14px; color: var(--text-soft); }

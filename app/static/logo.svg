@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 270" fill="none" aria-label="Trilha de Fé">
+  <!-- Arco laranja: começa na ponta esquerda, sobe, cruza e termina numa folha à direita -->
+  <path d="M18 158 C 105 62, 268 58, 348 162 C 388 214, 432 190, 462 178" stroke="#E39B66" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M452 180 L 478 170" stroke="#E39B66" stroke-width="22" stroke-linecap="round"/>
+  <ellipse cx="503" cy="158" rx="38" ry="19" transform="rotate(-14 503 158)" fill="#E39B66"/>
+  <!-- Arco índigo: começa na mesma ponta, desce, cruza e sobe até uma folha no alto -->
+  <path d="M18 158 C 105 254, 268 254, 348 148 C 392 92, 420 78, 452 60" stroke="#2E3192" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M446 64 L 470 48" stroke="#2E3192" stroke-width="22" stroke-linecap="round"/>
+  <ellipse cx="490" cy="36" rx="36" ry="19" transform="rotate(-40 490 36)" fill="#2E3192"/>
+</svg>

@@ -11,7 +11,7 @@ services:
       - PUBLIC_URL=${PUBLIC_URL:-}
       - BREVO_API_KEY=${BREVO_API_KEY:-}
       - MAIL_FROM=${MAIL_FROM:-}
-      - MAIL_FROM_NAME=${MAIL_FROM_NAME:-Portal de Devocionais}
+      - MAIL_FROM_NAME=${MAIL_FROM_NAME:-Trilha de Fé}
     volumes:
       - ./devocionais:/srv/devocionais
       - db_data:/srv/app/data

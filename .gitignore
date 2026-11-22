@@ -7,3 +7,4 @@ app/__pycache__/
 # zip original e artefatos locais
 *.zip
 .DS_Store
+.claude/

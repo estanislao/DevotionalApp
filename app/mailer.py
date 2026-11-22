@@ -6,7 +6,7 @@ import urllib.error
 
 BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "").strip()
 MAIL_FROM = os.environ.get("MAIL_FROM", "").strip()
-MAIL_FROM_NAME = os.environ.get("MAIL_FROM_NAME", "Portal de Devocionais").strip()
+MAIL_FROM_NAME = os.environ.get("MAIL_FROM_NAME", "Trilha de Fé").strip()
 BREVO_URL = "https://api.brevo.com/v3/smtp/email"
 
 
