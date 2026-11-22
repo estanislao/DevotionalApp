@@ -1,5 +1,5 @@
 import pytest
-from tests.conftest import entrar, cadastro, cadastrar_e_aprovar, novo_cliente
+from tests.conftest import entrar, cadastro, cadastrar_e_aprovar, novo_cliente, mensagem
 
 SLUG = "2026-11-22-teste"
 PROTEGIDAS = ["/", "/colecao/1", f"/d/{SLUG}", f"/d/{SLUG}/ler", f"/d/{SLUG}/slides", f"/d/{SLUG}/slide/1",
@@ -59,38 +59,39 @@ def test_membro_comum_nao_apaga_partilha_de_outro(app_mod, client):
 def test_conta_pendente_nao_entra(client):
     cadastro(client, "Bia", "bia@teste.com")
     r = client.post("/login", data={"email": "bia@teste.com", "senha": "segredo123"})
-    assert r.headers["location"] == "/login?erro=pendente"
+    assert r.headers["location"] == "/login" and "ainda não foi aprovada" in mensagem(client, r)
 
 
 # ---------- login ----------
 def test_login_senha_errada_e_bloqueio_do_par_email_ip(client):
     for _ in range(5):
-        assert client.post("/login", data={"email": "admin@teste.com", "senha": "errada"}).headers["location"].startswith("/login?erro=1")
+        r = client.post("/login", data={"email": "admin@teste.com", "senha": "errada"})
+        assert r.headers["location"] == "/login" and "incorretos" in mensagem(client, r)
     r = client.post("/login", data={"email": "admin@teste.com", "senha": "senha-admin-1"})
-    assert r.headers["location"] == "/login?erro=bloqueado"
+    assert "Muitas tentativas" in mensagem(client, r)
 
 
 def test_login_bloqueio_por_ip_com_emails_diferentes(app_mod, client):
     for i in range(app_mod.auth.LOGIN_IP_MAX):
         client.post("/login", data={"email": f"x{i}@teste.com", "senha": "errada"})
     r = client.post("/login", data={"email": "admin@teste.com", "senha": "senha-admin-1"})
-    assert r.headers["location"] == "/login?erro=bloqueado"
+    assert "Muitas tentativas" in mensagem(client, r)
 
 
 # ---------- cadastro (A-03) ----------
 def test_cadastro_isca_nao_cria_conta(client):
     from app import db
     r = cadastro(client, "Robo", "robo@teste.com", site="http://spam")
-    assert r.headers["location"] == "/login?ok=cadastro"   # finge sucesso
+    assert r.headers["location"] == "/login" and "Inscrição enviada" in mensagem(client, r)   # finge sucesso
     with db.session() as c:
         assert c.execute("SELECT COUNT(*) FROM members WHERE email='robo@teste.com'").fetchone()[0] == 0
 
 
 def test_cadastro_limite_por_ip(app_mod, client):
     for i in range(app_mod.CADASTRO_POR_IP):
-        assert cadastro(client, f"P{i}", f"p{i}@teste.com").headers["location"] == "/login?ok=cadastro"
+        assert cadastro(client, f"P{i}", f"p{i}@teste.com").headers["location"] == "/login"
     r = cadastro(client, "Extra", "extra@teste.com")
-    assert "Muitas%20inscri" in r.headers["location"]
+    assert "Muitas inscrições" in mensagem(client, r)
 
 
 def test_cadastro_fecha_com_muitas_pendentes(app_mod, client, monkeypatch):
@@ -98,16 +99,17 @@ def test_cadastro_fecha_com_muitas_pendentes(app_mod, client, monkeypatch):
     monkeypatch.setattr(app_mod, "CADASTRO_POR_IP", 99)
     for i in range(2):
         cadastro(client, f"P{i}", f"p{i}@teste.com")
-    assert "temporariamente" in cadastro(client, "Zeca", "z@teste.com").headers["location"]
+    assert "temporariamente" in mensagem(client, cadastro(client, "Zeca", "z@teste.com"))
 
 
 def test_cadastro_senha_curta_comum_e_email_duplicado_neutro(client):
     from app import db
-    assert "pelo%20menos" in cadastro(client, "Cid", "cid@teste.com", senha="123").headers["location"]
-    assert "muito%20comum" in cadastro(client, "Cid", "cid@teste.com", senha="12345678").headers["location"]
-    assert cadastro(client, "Cid", "cid@teste.com").headers["location"] == "/login?ok=cadastro"
+    assert "pelo menos" in mensagem(client, cadastro(client, "Cid", "cid@teste.com", senha="123"))
+    assert "muito comum" in mensagem(client, cadastro(client, "Cid", "cid@teste.com", senha="12345678"))
+    assert cadastro(client, "Cid", "cid@teste.com").headers["location"] == "/login"
     # segundo cadastro com o mesmo e-mail: mesma resposta, nenhuma conta nova (não revela que existe)
-    assert cadastro(client, "Cid2", "cid@teste.com").headers["location"] == "/login?ok=cadastro"
+    r2 = cadastro(client, "Cid2", "cid@teste.com")
+    assert r2.headers["location"] == "/login" and "Inscrição enviada" in mensagem(client, r2)
     with db.session() as c:
         assert c.execute("SELECT COUNT(*) FROM members WHERE email='cid@teste.com'").fetchone()[0] == 1
 
@@ -158,4 +160,4 @@ def test_partilha_escapa_html_e_limita_por_dia(client):
     assert "<script>alert(1)</script>" not in html and "&lt;script&gt;" in html
     client.post("/partilhas", data={"texto": "segunda"}); client.post("/partilhas", data={"texto": "terceira"})
     r = client.post("/partilhas", data={"texto": "quarta"})
-    assert "partilha_erro" in r.headers["location"]
+    assert r.headers["location"] == "/#partilhas" and "já compartilhou" in mensagem(client, r)

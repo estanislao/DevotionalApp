@@ -52,7 +52,7 @@ gzip -f "$ARQ"
 
 # 3) Espelho das devocionais, SEM apagar o que for removido na origem (protege contra exclusão acidental).
 #    Os slides em imagem são regerados sozinhos a partir do PDF, então ficam de fora.
-rsync -a --exclude slides "$APP/devocionais/" "$DEST/devocionais-espelho/"
+rsync -a --exclude slides --exclude '.publicando-*' "$APP/devocionais/" "$DEST/devocionais-espelho/"
 
 # 4) Retenção do banco.
 find "$DEST" -maxdepth 1 -name 'portal-*.db.gz' -mtime +"$RETENCAO_DIAS" -delete

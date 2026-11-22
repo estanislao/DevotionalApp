@@ -1,5 +1,5 @@
 """Regressão dos achados R-01 (XSS pelo nome), N-02 (HTML nos e-mails) e R-02 (corpo gigante)."""
-from tests.conftest import entrar, cadastro
+from tests.conftest import entrar, cadastro, mensagem
 
 
 def cadastrar(c, nome, email, senha="segredo123"):
@@ -8,7 +8,7 @@ def cadastrar(c, nome, email, senha="segredo123"):
 
 def test_r01_nome_com_apostrofo_nao_vira_javascript(client):
     nome = "x');alert(1);('"
-    assert cadastrar(client, nome, "xss@teste.com").headers["location"] == "/login?ok=cadastro"
+    assert cadastrar(client, nome, "xss@teste.com").headers["location"] == "/login"
     entrar(client)
     html = client.get("/admin/membros").text
     assert nome not in html                                    # nunca aparece cru
@@ -26,9 +26,9 @@ def test_r01_nome_de_colecao_tambem_fica_fora_do_javascript(client):
 
 def test_n02_email_com_html_e_recusado(client):
     r = cadastrar(client, "Ana", "<a/href=https://evil.example>clique</a>@a.co")
-    assert "E-mail%20inv%C3%A1lido" in r.headers["location"]
+    assert "E-mail inválido" in mensagem(client, r)
     r = cadastrar(client, "Ana", "a" * 250 + "@teste.com")           # passa de 254 caracteres
-    assert "E-mail%20inv%C3%A1lido" in r.headers["location"]
+    assert "E-mail inválido" in mensagem(client, r)
 
 
 def test_n02_nome_com_html_sai_escapado_no_email_ao_admin(app_mod, client, monkeypatch):

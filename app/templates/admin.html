@@ -10,14 +10,15 @@
   <div class="admin-links">
     <a href="/admin/membros" class="btn-secondary">Membros{% if pendentes %} <span class="badge-num" style="position:static; margin-left:6px">{{ pendentes }}</span>{% endif %}</a>
     <a href="/admin/colecoes" class="btn-secondary">Coleções</a>
+    <a href="/admin/registro" class="btn-secondary">Registro</a>
   </div>
 </div>
 
 <form method="post" action="/admin/publicar" enctype="multipart/form-data" class="main">
   <h2 class="section-title">Nova devocional</h2>
 
-  {% if request.query_params.get('publicado') %}
-  <div class="explicacao"><span class="ok">Publicado! A família já consegue ver.</span></div>
+  {% if ok_msg %}
+  <div class="explicacao"><span class="ok">{{ ok_msg }}</span></div>
   {% endif %}
   {% if erro_msg %}
   <p class="erro">Não publicado: {{ erro_msg }}</p>

@@ -2,7 +2,7 @@
 quiz (M-11), senhas (M-12) e admin só na criação (M-13)."""
 import hashlib
 import pytest
-from tests.conftest import entrar, cadastro, cadastrar_e_aprovar, novo_cliente, membro_id, CONVITE
+from tests.conftest import entrar, cadastro, cadastrar_e_aprovar, novo_cliente, membro_id, mensagem, CONVITE
 
 SLUG = "2026-11-22-teste"
 
@@ -146,7 +146,7 @@ def test_quem_erra_de_um_ip_nao_tranca_o_dono_em_outro(app_mod, client):
     atacante = novo_cliente(app_mod, "198.51.100.7")
     for _ in range(5):
         atacante.post("/login", data={"email": "admin@teste.com", "senha": "chute"})
-    assert atacante.post("/login", data={"email": "admin@teste.com", "senha": "senha-admin-1"}).headers["location"] == "/login?erro=bloqueado"
+    assert "Muitas tentativas" in mensagem(atacante, atacante.post("/login", data={"email": "admin@teste.com", "senha": "senha-admin-1"}))
     dono = novo_cliente(app_mod, "203.0.113.20")
     entrar(dono)                                               # o dono, de outro IP, entra normalmente
 
@@ -157,7 +157,7 @@ def test_o_bloqueio_sobrevive_a_reinicio(app_mod, client):
     from fastapi.testclient import TestClient
     with TestClient(app_mod.app, follow_redirects=False) as depois_do_reinicio:   # sobe o app de novo, mesmo banco
         r = depois_do_reinicio.post("/login", data={"email": "admin@teste.com", "senha": "senha-admin-1"})
-        assert r.headers["location"] == "/login?erro=bloqueado"
+        assert "Muitas tentativas" in mensagem(depois_do_reinicio, r)
 
 
 def test_login_certo_zera_o_contador_do_par(client):
@@ -233,7 +233,7 @@ def test_inscricao_pendente_nao_vira_admin_no_reinicio(app_mod, client, monkeypa
         linha = c.execute("SELECT is_admin, status FROM members WHERE email='intruso@teste.com'").fetchone()
         assert (linha["is_admin"], linha["status"]) == (0, "pendente")
     r = client.post("/login", data={"email": "intruso@teste.com", "senha": "outra-senha-34"})
-    assert r.headers["location"].startswith("/login?erro")      # a senha do .env não vira a senha dele
+    assert "incorretos" in mensagem(client, r)                  # a senha do .env não vira a senha dele
 
 
 def test_custo_da_senha_errada_e_igual_com_hash_antigo_e_sem_conta(app_mod, client, monkeypatch):

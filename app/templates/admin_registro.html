@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Registro de ações{% endblock %}
+{% block content %}
+<div class="main" style="padding-top:28px">
+  <div class="topbar" style="padding:0">
+    <a href="/admin" class="icon-btn" aria-label="Voltar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></a>
+    <h1 style="margin:0; font-size:22px; font-weight:700">Registro de ações</h1>
+    <span style="width:44px"></span>
+  </div>
+  <p style="margin:0; font-size:14px; line-height:1.5; color:var(--text-soft)">O que o administrador fez, e quando. Ficam guardadas as últimas 1000 ações; aqui aparecem as 100 mais recentes.</p>
+  <div class="lista-anteriores">
+    {% for l in linhas %}
+    <div class="item-anterior" style="align-items:flex-start">
+      <span style="display:flex; flex-direction:column; gap:2px; min-width:0">
+        <span class="titulo">{{ l['admin_nome'] }} {{ l['acao'] }}</span>
+        {% if l['detalhe'] %}<span class="meta" style="overflow-wrap:anywhere">{{ l['detalhe'] }}</span>{% endif %}
+        <span class="meta">{{ l['quando'][8:10] }}/{{ l['quando'][5:7] }}/{{ l['quando'][0:4] }} às {{ l['quando'][11:16] }} (UTC)</span>
+      </span>
+    </div>
+    {% else %}
+    <p style="margin:0; color:var(--text-soft); font-size:14px">Nenhuma ação registrada ainda.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

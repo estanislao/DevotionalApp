@@ -8,7 +8,7 @@ services:
     # abaixo e em /tmp), sem nenhuma capability de root e sem poder ganhar privilégio.
     read_only: true
     tmpfs:
-      - /tmp:size=256m
+      - /tmp:size=300m   # uploads grandes passam por aqui antes de ir para o disco (conta no mem_limit)
     cap_drop:
       - ALL
     security_opt:

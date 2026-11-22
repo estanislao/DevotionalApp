@@ -34,8 +34,8 @@ def list_devotionals() -> list[dict]:
     items = []
     for folder in sorted(DEVOCIONAIS_DIR.iterdir(), reverse=True):
         meta_path = folder / "meta.json"
-        if not (folder.is_dir() and meta_path.exists()):
-            continue
+        if folder.name.startswith(".") or not (folder.is_dir() and meta_path.exists()):
+            continue   # ".publicando-*" é uma publicação em andamento
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):

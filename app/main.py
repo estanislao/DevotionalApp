@@ -14,6 +14,7 @@ Rotas principais:
 import os
 import re
 import hmac
+import shutil
 import html as _html
 import json
 import unicodedata
@@ -24,6 +25,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
+from itsdangerous import URLSafeTimedSerializer, BadSignature
 from fastapi import FastAPI, Request, Form, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse, Response
@@ -37,7 +39,7 @@ BASE_DIR = Path(__file__).parent
 DEVOCIONAIS_DIR = BASE_DIR.parent / "devocionais"
 
 # Limites de upload (bytes). Áudio de podcast de 30 min em 64 kbps ≈ 15 MB.
-LIMITE_AUDIO = 200 * 1024 * 1024
+LIMITE_AUDIO = 100 * 1024 * 1024
 LIMITE_PDF = 50 * 1024 * 1024
 LIMITE_TEXTO = 2 * 1024 * 1024
 EXT_AUDIO = {".mp3", ".m4a", ".aac", ".ogg", ".wav"}
@@ -55,7 +57,7 @@ PARTILHA_MAX = 280
 CADASTRO_CODIGO = os.environ.get("CADASTRO_CODIGO", "").strip()
 CONVITE_ERROS_POR_IP = 10     # tentativas de código errado por hora
 CORPO_MAX_PADRAO = 1 * 1024 * 1024            # 1 MB em qualquer rota
-CORPO_MAX_PUBLICAR = 260 * 1024 * 1024       # só /admin/publicar aceita arquivos grandes
+CORPO_MAX_PUBLICAR = 170 * 1024 * 1024       # só /admin/publicar aceita arquivos grandes (áudio 100 + PDF 50 + textos)
 # Limites contra abuso (por IP; contadores em memória, zeram ao reiniciar)
 CADASTRO_POR_IP = 5            # inscrições por hora
 CADASTRO_PENDENTES_MAX = 100   # acima disso, inscrições ficam fechadas até o admin limpar a fila
@@ -173,6 +175,58 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     return pagina_erro(request, 400, "Dados incompletos", "O formulário veio incompleto. Volte e tente de novo.")
 
 
+# ---------- Recados de uma vez só (no lugar de mensagens na URL) ----------
+
+RECADO_COOKIE = "recado"
+_recados = URLSafeTimedSerializer(auth.SECRET, salt="recado-v1")
+MSG_INSCRICAO = "Inscrição enviada! Você poderá entrar assim que o administrador aprovar. Se você já tinha conta, use 'Recuperar senha'."
+
+
+def redirecionar(url: str, msg: str | None = None, tipo: str = "erro", **dados) -> RedirectResponse:
+    """Redireciona (303) levando, se houver, uma mensagem para a próxima tela. A mensagem e os dados para
+    reaproveitar nos campos (e-mail, nome) viajam num cookie assinado de 2 minutos, nunca na URL: ninguém
+    consegue mostrar um texto qualquer na tela de outra pessoa por meio de um link."""
+    resp = RedirectResponse(url, status_code=303)
+    if msg:
+        resp.set_cookie(RECADO_COOKIE, _recados.dumps({"t": tipo, "m": msg, "d": dados}), max_age=120, httponly=True,
+                        secure=auth.COOKIE_SECURE, samesite="lax", path="/")
+    return resp
+
+
+def ler_recado(request: Request) -> dict:
+    bruto = request.cookies.get(RECADO_COOKIE)
+    if not bruto:
+        return {}
+    try:
+        dados = _recados.loads(bruto, max_age=120)
+    except BadSignature:        # inclui recado vencido ou adulterado
+        return {}
+    return dados if isinstance(dados, dict) else {}
+
+
+def pagina(request: Request, nome: str, contexto: dict | None = None, status: int = 200):
+    """Renderiza uma tela mostrando (e consumindo) o recado pendente, se houver."""
+    contexto = dict(contexto or {})
+    recado = ler_recado(request)
+    if recado.get("m"):
+        contexto.setdefault("ok_msg" if recado.get("t") == "ok" else "erro_msg", str(recado["m"]))
+    for chave, valor in (recado.get("d") or {}).items():
+        contexto.setdefault(chave, valor)
+    contexto.setdefault("erro_msg", None)
+    contexto.setdefault("ok_msg", None)
+    resp = templates.TemplateResponse(request, nome, contexto, status_code=status)
+    if RECADO_COOKIE in request.cookies:
+        resp.delete_cookie(RECADO_COOKIE, path="/")
+    return resp
+
+
+def registrar_acao(conn, admin: dict, acao: str, detalhe: str = "") -> None:
+    """Trilha de auditoria das ações do administrador (quem, o quê, quando). Guarda as últimas 1000."""
+    conn.execute("INSERT INTO admin_log (quando, admin_id, admin_nome, acao, detalhe) VALUES (?,?,?,?,?)",
+                 (agora(), admin["id"], admin["name"], acao, detalhe[:300]))
+    conn.execute("DELETE FROM admin_log WHERE id NOT IN (SELECT id FROM admin_log ORDER BY id DESC LIMIT 1000)")
+
+
 # ---------- Helpers ----------
 
 def progress_for(conn, member_id: int, slug: str) -> set[str]:
@@ -237,22 +291,7 @@ def botao_email(link: str, rotulo: str) -> str:
 def login_form(request: Request):
     if auth.current_member(request):
         return RedirectResponse("/")
-    erro = request.query_params.get("erro")
-    mensagens = {
-        "1": "E-mail ou senha incorretos. Se você acabou de criar uma senha, use o mesmo e-mail que recebeu o link.",
-        "pendente": "Sua inscrição ainda não foi aprovada pelo administrador.",
-        "bloqueado": "Muitas tentativas erradas. Espere alguns minutos e tente de novo.",
-    }
-    ok = request.query_params.get("ok")
-    ok_msgs = {
-        "senha": "Senha redefinida. Entre com a nova.",
-        "cadastro": "Inscrição enviada! Você poderá entrar assim que o administrador aprovar. Se você já tinha conta, use 'Recuperar senha'.",
-    }
-    return templates.TemplateResponse(request, "login.html", {
-        "erro_msg": mensagens.get(erro), "ok_msg": ok_msgs.get(ok),
-        "email_habilitado": mailer.email_habilitado(),
-        "email": request.query_params.get("email", ""),
-    })
+    return pagina(request, "login.html", {"email_habilitado": mailer.email_habilitado()})
 
 
 def sessao_cookie(resp, member_id: int, version: int = 0):
@@ -272,7 +311,7 @@ def login_submit(request: Request, email: str = Form(...), senha: str = Form(...
     email = email.strip().lower()[:EMAIL_MAX]
     ip = ip_cliente(request)
     if auth.login_bloqueado(email, ip):
-        return RedirectResponse("/login?erro=bloqueado", status_code=303)
+        return redirecionar("/login", "Muitas tentativas erradas. Espere alguns minutos e tente de novo.")
     with db.session() as conn:
         row = conn.execute("SELECT * FROM members WHERE email=?", (email,)).fetchone()
     # Sempre calcula um hash, mesmo sem conta: o tempo de resposta não revela quais e-mails existem.
@@ -281,9 +320,9 @@ def login_submit(request: Request, email: str = Form(...), senha: str = Form(...
         if row:
             auth.igualar_tempo(row["password_hash"])   # hash antigo: completa o custo para ficar igual ao caso sem conta
         auth.login_falhou(email, ip)
-        return RedirectResponse(f"/login?erro=1&email={quote(email)}", status_code=303)
+        return redirecionar("/login", "E-mail ou senha incorretos. Se você acabou de criar uma senha, use o mesmo e-mail que recebeu o link.", email=email)
     if row["status"] != "ativo":
-        return RedirectResponse("/login?erro=pendente", status_code=303)
+        return redirecionar("/login", "Sua inscrição ainda não foi aprovada pelo administrador.")
     auth.login_ok(email, ip)
     if auth.precisa_rehash(row["password_hash"]):   # hash antigo (menos iterações): atualiza agora que temos a senha
         with db.session() as conn:
@@ -302,12 +341,8 @@ def convite_valido(codigo: str) -> bool:
     return bool(CADASTRO_CODIGO) and hmac.compare_digest(codigo.encode("utf-8"), CADASTRO_CODIGO.encode("utf-8"))
 
 
-def pagina_cadastro(request: Request, aberto: bool, convite: str = "", status: int = 200, **extra):
-    return templates.TemplateResponse(request, "cadastro.html", {
-        "aberto": aberto, "convite": convite if aberto else "",
-        "erro_msg": extra.get("erro_msg"), "nome": extra.get("nome", ""), "email": extra.get("email", ""),
-        "senha_min": auth.SENHA_MIN,
-    }, status_code=status)
+def pagina_cadastro(request: Request, aberto: bool, convite: str = "", status: int = 200):
+    return pagina(request, "cadastro.html", {"aberto": aberto, "convite": convite if aberto else "", "senha_min": auth.SENHA_MIN}, status)
 
 
 @app.get("/cadastro", response_class=HTMLResponse)
@@ -316,9 +351,7 @@ def cadastro_form(request: Request):
         return RedirectResponse("/")
     codigo = request.query_params.get("c", "")
     aberto = convite_valido(codigo)
-    return pagina_cadastro(request, aberto, codigo,
-                           erro_msg=request.query_params.get("erro") if aberto else None,
-                           nome=request.query_params.get("nome", ""), email=request.query_params.get("email", ""))
+    return pagina_cadastro(request, aberto, codigo)
 
 
 @app.post("/cadastro")
@@ -326,7 +359,7 @@ def cadastro_submit(request: Request, nome: str = Form(...), email: str = Form(.
                     senha2: str = Form(...), site: str = Form(""), convite: str = Form("")):
     nome, email = nome.strip()[:60], email.strip().lower()
     if site.strip():   # campo isca, invisível para pessoas: só robôs preenchem. Finge sucesso e não cria nada.
-        return RedirectResponse("/login?ok=cadastro", status_code=303)
+        return redirecionar("/login", MSG_INSCRICAO, "ok")
     ip = ip_cliente(request)
     if not convite_valido(convite):
         auth.registrar_evento(f"convite:{ip}")   # quem chuta códigos é freado (a resposta é a mesma de sempre)
@@ -335,7 +368,7 @@ def cadastro_submit(request: Request, nome: str = Form(...), email: str = Form(.
         return pagina_cadastro(request, False, status=403)
 
     def volta(msg: str):
-        return RedirectResponse(f"/cadastro?c={quote(convite)}&erro={quote(msg)}&nome={quote(nome)}&email={quote(email)}", status_code=303)
+        return redirecionar(f"/cadastro?c={quote(convite)}", msg, nome=nome, email=email)
 
     if len(nome) < 2:
         return volta("Digite seu nome.")
@@ -354,7 +387,7 @@ def cadastro_submit(request: Request, nome: str = Form(...), email: str = Form(.
         if pendentes >= CADASTRO_PENDENTES_MAX:
             return volta("As inscrições estão temporariamente fechadas. Fale com o administrador.")
         if conn.execute("SELECT 1 FROM members WHERE email=?", (email,)).fetchone():
-            return RedirectResponse("/login?ok=cadastro", status_code=303)   # resposta neutra: não revela que a conta existe
+            return redirecionar("/login", MSG_INSCRICAO, "ok")   # resposta neutra: não revela que a conta existe
         conn.execute(
             "INSERT INTO members (name, email, password_hash, pin, is_admin, status, created_at) VALUES (?,?,?,'',0,'pendente',?)",
             (nome, email, novo_hash, agora()),
@@ -370,7 +403,7 @@ def cadastro_submit(request: Request, nome: str = Form(...), email: str = Form(.
                 f"<p><strong>{esc(nome)}</strong> ({esc(email)}) pediu para entrar no {APP_NOME}.</p>"
                 f"<p>{botao_email(link, 'Ver inscrições')}</p>",
             )
-    return RedirectResponse("/login?ok=cadastro", status_code=303)
+    return redirecionar("/login", MSG_INSCRICAO, "ok")
 
 
 # ---------- Esqueci minha senha ----------
@@ -383,11 +416,7 @@ def _hash_token(token: str) -> str:
 def esqueci_form(request: Request):
     if auth.current_member(request):
         return RedirectResponse("/")
-    return templates.TemplateResponse(request, "esqueci.html", {
-        "email_habilitado": mailer.email_habilitado(),
-        "erro_msg": request.query_params.get("erro"),
-        "email": request.query_params.get("email", ""),
-    })
+    return pagina(request, "esqueci.html", {"email_habilitado": mailer.email_habilitado()})
 
 
 def mascarar_email(email: str) -> str:
@@ -406,10 +435,10 @@ def esqueci_enviado(request: Request):
 def esqueci_enviar(request: Request, background: BackgroundTasks, email: str = Form(...)):
     email = email.strip().lower()
     if not mailer.email_habilitado():
-        return RedirectResponse(f"/esqueci?erro={quote('Envio de e-mail não está configurado. Fale com o administrador.')}", status_code=303)
+        return redirecionar("/esqueci", "Envio de e-mail não está configurado. Fale com o administrador.")
     # Resposta é a mesma exista a conta ou não (não revela quem está cadastrado).
     if len(email) > EMAIL_MAX or not EMAIL_RE.match(email):
-        return RedirectResponse(f"/esqueci?erro={quote('Digite um e-mail válido.')}&email={quote(email[:EMAIL_MAX])}", status_code=303)
+        return redirecionar("/esqueci", "Digite um e-mail válido.", email=email[:EMAIL_MAX])
     enviado = RedirectResponse(f"/esqueci/enviado?e={quote(mascarar_email(email))}", status_code=303)
     if not auth.permitir(f"esqueci:{ip_cliente(request)}", ESQUECI_POR_IP, 3600):
         return enviado   # mesma resposta de sempre: não revela que o limite foi atingido
@@ -461,10 +490,7 @@ def redefinir_form(request: Request, token: str):
         if not reset:
             return pagina_erro(request, 400, *LINK_VENCIDO)
         membro = conn.execute("SELECT name FROM members WHERE id=?", (reset["member_id"],)).fetchone()
-    return templates.TemplateResponse(request, "redefinir.html", {
-        "token": token, "nome": primeiro_nome(membro["name"]),
-        "erro_msg": request.query_params.get("erro"), "senha_min": auth.SENHA_MIN,
-    })
+    return pagina(request, "redefinir.html", {"token": token, "nome": primeiro_nome(membro["name"]), "senha_min": auth.SENHA_MIN})
 
 
 def trocar_senha(conn, member_id: int, senha: str) -> int:
@@ -480,7 +506,7 @@ def trocar_senha(conn, member_id: int, senha: str) -> int:
 def redefinir_salvar(request: Request, token: str, senha: str = Form(...), senha2: str = Form(...)):
     erro = auth.validar_senha(senha) or (None if senha == senha2 else "As duas senhas não são iguais.")
     if erro:
-        return RedirectResponse(f"/redefinir/{token}?erro={quote(erro)}", status_code=303)
+        return redirecionar(f"/redefinir/{token}", erro)
     with db.session() as conn:
         reset = _reset_valido(conn, token)
         if not reset:
@@ -548,12 +574,11 @@ def home(request: Request):
                JOIN members m ON m.id = s.member_id ORDER BY s.id DESC LIMIT ?""", (PARTILHAS_NO_INICIO,)).fetchall()]
         pendentes = conn.execute("SELECT COUNT(*) FROM members WHERE status='pendente'").fetchone()[0] if member["is_admin"] else 0
 
-    return templates.TemplateResponse(request, "index.html", {
+    return pagina(request, "index.html", {
         "member": member, "destaque": destaque, "ultimas": ultimas, "colecoes": colecoes, "avulsas": avulsas,
         "familia": familia, "meu_progresso": meu_progresso, "total_passos": content.TOTAL_ATIVIDADES,
-        "aba": request.query_params.get("aba", "colecao"), "pendentes": pendentes,
+        "aba": "ultimas" if request.query_params.get("aba") == "ultimas" else "colecao", "pendentes": pendentes,
         "partilhas": partilhas, "partilha_max": PARTILHA_MAX,
-        "partilha_erro": request.query_params.get("partilha_erro"),
     })
 
 
@@ -564,16 +589,16 @@ def partilha_criar(request: Request, texto: str = Form("")):
     member = auth.require_member(request)
     texto = " ".join(texto.split())
     if len(texto) < 3:
-        return RedirectResponse(f"/?partilha_erro={quote('Escreva algo antes de compartilhar.')}#partilhas", status_code=303)
+        return redirecionar("/#partilhas", "Escreva algo antes de compartilhar.")
     if len(texto) > PARTILHA_MAX:
-        return RedirectResponse(f"/?partilha_erro={quote(f'Use até {PARTILHA_MAX} caracteres.')}#partilhas", status_code=303)
+        return redirecionar("/#partilhas", f"Use até {PARTILHA_MAX} caracteres.")
     with db.session() as conn:
         recentes = conn.execute(
             "SELECT COUNT(*) FROM shares WHERE member_id=? AND created_at > ?",
             (member["id"], (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()),
         ).fetchone()[0]
         if recentes >= PARTILHAS_POR_DIA:
-            return RedirectResponse(f"/?partilha_erro={quote(f'Você já compartilhou {PARTILHAS_POR_DIA} vezes hoje. Volte amanhã.')}#partilhas", status_code=303)
+            return redirecionar("/#partilhas", f"Você já compartilhou {PARTILHAS_POR_DIA} vezes hoje. Volte amanhã.")
         conn.execute("INSERT INTO shares (member_id, text, created_at) VALUES (?,?,?)", (member["id"], texto, agora()))
     return RedirectResponse("/#partilhas", status_code=303)
 
@@ -772,10 +797,9 @@ def admin_home(request: Request):
     with db.session() as conn:
         mapa = colecoes_por_id(conn)
         pendentes = conn.execute("SELECT COUNT(*) FROM members WHERE status='pendente'").fetchone()[0]
-    return templates.TemplateResponse(request, "admin.html", {
+    return pagina(request, "admin.html", {
         "devotionals": anexar_colecao(content.list_devotionals(), mapa),
         "colecoes": list(mapa.values()), "pendentes": pendentes,
-        "erro_msg": request.query_params.get("erro"),
     })
 
 
@@ -791,6 +815,30 @@ async def ler_upload(upload: UploadFile, limite: int, rotulo: str) -> bytes:
     if not data:
         raise ValueError(f"{rotulo} veio vazio.")
     return data
+
+
+BLOCO = 1024 * 1024
+
+
+async def salvar_upload(upload: UploadFile, destino: Path, limite: int, rotulo: str, assinatura: bytes | None = None,
+                        tipo: str = "arquivo") -> int:
+    """Grava o arquivo no disco em blocos de 1 MB (a memória nunca guarda o arquivo inteiro).
+    Levanta ValueError se passar do limite, vier vazio ou não começar pela assinatura esperada."""
+    total = 0
+    with destino.open("wb") as saida:
+        while True:
+            bloco = await upload.read(BLOCO)
+            if not bloco:
+                break
+            if total == 0 and assinatura and not bloco.startswith(assinatura):
+                raise ValueError(f"{rotulo} não parece ser um {tipo} válido.")
+            total += len(bloco)
+            if total > limite:
+                raise ValueError(f"{rotulo} passou do limite de {limite // (1024 * 1024)} MB.")
+            await run_in_threadpool(saida.write, bloco)
+    if total == 0:
+        raise ValueError(f"{rotulo} veio vazio.")
+    return total
 
 
 def extensao_permitida(upload: UploadFile, permitidas: set[str], rotulo: str) -> str:
@@ -813,10 +861,10 @@ async def admin_publicar(
     quiz: UploadFile = File(...),
     licoes: UploadFile = File(...),
 ):
-    auth.require_admin(request)
+    admin = auth.require_admin(request)
 
     def falhou(msg: str):
-        return RedirectResponse(f"/admin?erro={quote(msg)}", status_code=303)
+        return redirecionar("/admin", msg)
 
     titulo = titulo.strip()[:120]
     data = data.strip()
@@ -847,6 +895,11 @@ async def admin_publicar(
     if folder.exists():
         return falhou("Já existe uma devocional com esse título e data. Mude o título ou apague a pasta antiga.")
 
+    # Tudo é montado numa pasta temporária (".publicando-*", ignorada nas listas) e só vira a devocional de
+    # verdade no final, com um rename atômico. Qualquer falha apaga a pasta temporária: nada fica pela metade.
+    temporaria = DEVOCIONAIS_DIR / f".publicando-{secrets.token_hex(6)}"
+    temporaria.mkdir(parents=True)
+    audio_name = pdf_name = ""
     try:
         ext_audio = extensao_permitida(audio, EXT_AUDIO, "Áudio")
         ext_pdf = extensao_permitida(apresentacao, EXT_PDF, "Apresentação")
@@ -859,42 +912,37 @@ async def admin_publicar(
                 b.decode("utf-8")
             except UnicodeDecodeError:
                 raise ValueError(f"{rotulo} precisa ser um arquivo de texto UTF-8.")
-        audio_bytes = await ler_upload(audio, LIMITE_AUDIO, "Áudio")
-        pdf_bytes = await ler_upload(apresentacao, LIMITE_PDF, "Apresentação")
-        if not pdf_bytes.startswith(b"%PDF"):
-            raise ValueError("Apresentação não parece ser um PDF válido.")
+        audio_name, pdf_name = f"audio{ext_audio}", f"apresentacao{ext_pdf}"
+        await salvar_upload(audio, temporaria / audio_name, LIMITE_AUDIO, "Áudio")
+        await salvar_upload(apresentacao, temporaria / pdf_name, LIMITE_PDF, "Apresentação", assinatura=b"%PDF", tipo="PDF")
+
+        (temporaria / "texto.md").write_bytes(texto_bytes)
+        (temporaria / "quiz.json").write_bytes(quiz_bytes)
+        (temporaria / "licoes.md").write_bytes(licoes_bytes)
+        meta = {"titulo": titulo, "data": data, "versiculo": versiculo.strip()[:120], "colecao_id": colecao,
+                "audio": audio_name, "apresentacao": pdf_name}
+        (temporaria / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        try:
+            os.rename(temporaria, folder)
+        except OSError:
+            raise ValueError("Já existe uma devocional com esse título e data.")
     except ValueError as e:
+        shutil.rmtree(temporaria, ignore_errors=True)
         return falhou(str(e))
-
-    audio_name = f"audio{ext_audio}"
-    pdf_name = f"apresentacao{ext_pdf}"
-
-    folder.mkdir(parents=True)
-    (folder / "texto.md").write_bytes(texto_bytes)
-    (folder / audio_name).write_bytes(audio_bytes)
-    (folder / pdf_name).write_bytes(pdf_bytes)
-    (folder / "quiz.json").write_bytes(quiz_bytes)
-    (folder / "licoes.md").write_bytes(licoes_bytes)
-
-    meta = {
-        "titulo": titulo,
-        "data": data,
-        "versiculo": versiculo.strip()[:120],
-        "colecao_id": colecao,
-        "audio": audio_name,
-        "apresentacao": pdf_name,
-    }
-    (folder / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        shutil.rmtree(temporaria, ignore_errors=True)
+        raise
 
     await run_in_threadpool(content.gerar_slides, slug, pdf_name)   # se falhar, a tela usa o PDF embutido
-
-    return RedirectResponse("/admin?publicado=1", status_code=303)
+    with db.session() as conn:
+        registrar_acao(conn, admin, "publicou devocional", slug)
+    return redirecionar("/admin", "Publicado! A família já consegue ver.", "ok")
 
 
 # ---------- Admin: membros (inscrições, senha, exclusão) ----------
 
 def _volta_membros(param: str, msg: str):
-    return RedirectResponse(f"/admin/membros?{param}={quote(msg)}", status_code=303)
+    return redirecionar("/admin/membros", msg, "ok" if param == "ok" else "erro")
 
 
 @app.get("/admin/membros", response_class=HTMLResponse)
@@ -904,11 +952,9 @@ def admin_membros(request: Request):
         rows = conn.execute("SELECT id, name, email, is_admin, status, created_at FROM members ORDER BY id").fetchall()
     pendentes = [dict(r) for r in rows if r["status"] == "pendente"]
     ativos = [dict(r) for r in rows if r["status"] == "ativo"]
-    return templates.TemplateResponse(request, "admin_membros.html", {
+    return pagina(request, "admin_membros.html", {
         "pendentes": pendentes, "ativos": ativos, "me": me,
         "convite_link": (f"{PUBLIC_URL or str(request.base_url).rstrip('/')}/cadastro?c={quote(CADASTRO_CODIGO)}" if CADASTRO_CODIGO else ""),
-        "ok_msg": request.query_params.get("ok"),
-        "erro_msg": request.query_params.get("erro"),
         "senha_min": auth.SENHA_MIN,
     })
 
@@ -922,10 +968,11 @@ def _membro_ou_404(conn, member_id: int):
 
 @app.post("/admin/membros/{member_id}/aprovar")
 def admin_membro_aprovar(request: Request, member_id: int):
-    auth.require_admin(request)
+    admin = auth.require_admin(request)
     with db.session() as conn:
         row = _membro_ou_404(conn, member_id)
         conn.execute("UPDATE members SET status='ativo' WHERE id=?", (member_id,))
+        registrar_acao(conn, admin, "aprovou inscrição", f"{row['name']} ({row['email']})")
     if row["email"] and mailer.email_habilitado():
         link = f"{PUBLIC_URL}/login" if PUBLIC_URL else "/login"
         enviar_email_silencioso(
@@ -946,18 +993,20 @@ def admin_membro_excluir(request: Request, member_id: int):
         for tabela in ("progress", "quiz_answers", "notes", "pin_resets", "shares"):
             conn.execute(f"DELETE FROM {tabela} WHERE member_id=?", (member_id,))
         conn.execute("DELETE FROM members WHERE id=?", (member_id,))
+        registrar_acao(conn, me, "recusou inscrição" if row["status"] == "pendente" else "excluiu membro", f"{row['name']} ({row['email']})")
     return _volta_membros("ok", f"{row['name']} excluído.")
 
 
 @app.post("/admin/membros/{member_id}/senha")
 def admin_membro_senha(request: Request, member_id: int, senha: str = Form(...)):
-    auth.require_admin(request)
+    admin = auth.require_admin(request)
     erro = auth.validar_senha(senha)
     if erro:
         return _volta_membros("erro", erro)
     with db.session() as conn:
         row = _membro_ou_404(conn, member_id)
         trocar_senha(conn, member_id, senha)
+        registrar_acao(conn, admin, "redefiniu a senha de", f"{row['name']} ({row['email']})")
     if row["email"]:
         auth.limpar_login(row["email"])
     return _volta_membros("ok", f"Senha de {row['name']} redefinida. As sessões abertas dessa pessoa foram encerradas.")
@@ -966,7 +1015,7 @@ def admin_membro_senha(request: Request, member_id: int, senha: str = Form(...))
 # ---------- Admin: coleções ----------
 
 def _volta_colecoes(param: str, msg: str):
-    return RedirectResponse(f"/admin/colecoes?{param}={quote(msg)}", status_code=303)
+    return redirecionar("/admin/colecoes", msg, "ok" if param == "ok" else "erro")
 
 
 @app.get("/admin/colecoes", response_class=HTMLResponse)
@@ -975,10 +1024,8 @@ def admin_colecoes(request: Request):
     contagem = content.count_by_collection()
     with db.session() as conn:
         cols = [dict(c, total=contagem.get(c["id"], 0)) for c in colecoes_por_id(conn).values()]
-    return templates.TemplateResponse(request, "admin_colecoes.html", {
+    return pagina(request, "admin_colecoes.html", {
         "colecoes": cols,
-        "ok_msg": request.query_params.get("ok"),
-        "erro_msg": request.query_params.get("erro"),
     })
 
 
@@ -991,19 +1038,20 @@ def _validar_colecao(nome: str, descricao: str) -> tuple[str, str] | str:
 
 @app.post("/admin/colecoes")
 def admin_colecao_criar(request: Request, nome: str = Form(...), descricao: str = Form("")):
-    auth.require_admin(request)
+    admin = auth.require_admin(request)
     v = _validar_colecao(nome, descricao)
     if isinstance(v, str):
         return _volta_colecoes("erro", v)
     nome, descricao = v
     with db.session() as conn:
         conn.execute("INSERT INTO collections (name, description, created_at) VALUES (?,?,?)", (nome, descricao, agora()))
+        registrar_acao(conn, admin, "criou coleção", nome)
     return _volta_colecoes("ok", f"Coleção '{nome}' criada.")
 
 
 @app.post("/admin/colecoes/{colecao_id}/editar")
 def admin_colecao_editar(request: Request, colecao_id: int, nome: str = Form(...), descricao: str = Form("")):
-    auth.require_admin(request)
+    admin = auth.require_admin(request)
     v = _validar_colecao(nome, descricao)
     if isinstance(v, str):
         return _volta_colecoes("erro", v)
@@ -1012,12 +1060,13 @@ def admin_colecao_editar(request: Request, colecao_id: int, nome: str = Form(...
         if not conn.execute("SELECT 1 FROM collections WHERE id=?", (colecao_id,)).fetchone():
             raise HTTPException(404, "Coleção não encontrada.")
         conn.execute("UPDATE collections SET name=?, description=? WHERE id=?", (nome, descricao, colecao_id))
+        registrar_acao(conn, admin, "editou coleção", nome)
     return _volta_colecoes("ok", f"Coleção '{nome}' atualizada.")
 
 
 @app.post("/admin/colecoes/{colecao_id}/excluir")
 def admin_colecao_excluir(request: Request, colecao_id: int):
-    auth.require_admin(request)
+    admin = auth.require_admin(request)
     if content.count_by_collection().get(colecao_id, 0) > 0:
         return _volta_colecoes("erro", "Essa coleção tem devocionais. Mova ou apague as devocionais antes de excluir.")
     with db.session() as conn:
@@ -1025,7 +1074,19 @@ def admin_colecao_excluir(request: Request, colecao_id: int):
         if not row:
             raise HTTPException(404, "Coleção não encontrada.")
         conn.execute("DELETE FROM collections WHERE id=?", (colecao_id,))
+        registrar_acao(conn, admin, "excluiu coleção", row["name"])
     return _volta_colecoes("ok", f"Coleção '{row['name']}' excluída.")
+
+
+# ---------- Admin: registro das ações ----------
+
+@app.get("/admin/registro", response_class=HTMLResponse)
+def admin_registro(request: Request):
+    auth.require_admin(request)
+    with db.session() as conn:
+        linhas = [dict(r) for r in conn.execute(
+            "SELECT quando, admin_nome, acao, detalhe FROM admin_log ORDER BY id DESC LIMIT 100").fetchall()]
+    return pagina(request, "admin_registro.html", {"linhas": linhas})
 
 
 # ---------- PWA ----------

@@ -33,6 +33,12 @@ def client(app_mod):
         yield c
 
 
+def mensagem(c, resp):
+    """Segue o redirecionamento e devolve o texto da tela seguinte, onde o recado de uma vez só aparece."""
+    assert resp.status_code == 303, resp.status_code
+    return c.get(resp.headers["location"]).text
+
+
 def novo_cliente(app_mod, ip="testclient"):
     return TestClient(app_mod.app, follow_redirects=False, client=(ip, 50000))
 
@@ -57,7 +63,7 @@ def membro_id(email):
 
 def cadastrar_e_aprovar(app_mod, admin, nome="Ana", email="ana@teste.com", senha="segredo123", ip="testclient"):
     r = cadastro(admin, nome, email, senha)
-    assert r.headers["location"] == "/login?ok=cadastro", r.headers["location"]
+    assert r.headers["location"] == "/login", r.headers["location"]
     mid = membro_id(email)
     admin.post(f"/admin/membros/{mid}/aprovar")
     outro = novo_cliente(app_mod, ip)

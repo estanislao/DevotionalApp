@@ -27,6 +27,15 @@ CREATE TABLE IF NOT EXISTS eventos (   -- contadores dos limites de uso (login, 
 CREATE INDEX IF NOT EXISTS idx_eventos_chave_ts ON eventos(chave, ts);
 CREATE INDEX IF NOT EXISTS idx_eventos_ts ON eventos(ts);
 
+CREATE TABLE IF NOT EXISTS admin_log (   -- trilha de auditoria das ações do administrador
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    quando TEXT NOT NULL,
+    admin_id INTEGER NOT NULL,
+    admin_nome TEXT NOT NULL,
+    acao TEXT NOT NULL,
+    detalhe TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS collections (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
