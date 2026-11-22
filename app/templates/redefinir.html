@@ -1,16 +1,16 @@
 {% extends "base.html" %}
-{% block title %}Novo PIN{% endblock %}
+{% block title %}Nova senha{% endblock %}
 {% block content %}
 <div class="login-wrap">
   <div style="text-align:center; display:flex; flex-direction:column; gap:6px">
-    <h1 style="margin:0; font-size:24px; font-weight:700">Novo PIN para {{ nome }}</h1>
-    <p style="margin:0; color:var(--text-soft); font-size:15px">Escolha um número de 4 a 6 dígitos.</p>
+    <h1 style="margin:0; font-size:24px; font-weight:700">Nova senha, {{ nome }}</h1>
+    <p style="margin:0; color:var(--text-soft); font-size:15px">Mínimo de {{ senha_min }} caracteres.</p>
   </div>
   {% if erro_msg %}<p class="erro">{{ erro_msg }}</p>{% endif %}
-  <form method="post" action="/redefinir/{{ token }}" style="display:flex; flex-direction:column; gap:16px">
-    <input class="pin-input" type="password" inputmode="numeric" name="pin" placeholder="novo PIN" maxlength="6" required autocomplete="new-password">
-    <input class="pin-input" type="password" inputmode="numeric" name="pin2" placeholder="repita o PIN" maxlength="6" required autocomplete="new-password">
-    <button type="submit" class="btn-primary">Salvar PIN</button>
+  <form method="post" action="/redefinir/{{ token }}" style="display:flex; flex-direction:column; gap:14px">
+    <div class="campo"><label for="senha">Nova senha</label><input id="senha" name="senha" type="password" required minlength="{{ senha_min }}" autocomplete="new-password"></div>
+    <div class="campo"><label for="senha2">Repita a senha</label><input id="senha2" name="senha2" type="password" required minlength="{{ senha_min }}" autocomplete="new-password"></div>
+    <button type="submit" class="btn-primary" style="margin-top:6px">Salvar senha</button>
   </form>
 </div>
 {% endblock %}

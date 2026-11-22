@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{{ colecao['name'] }}{% endblock %}
+{% block content %}
+<div class="main" style="padding-top:28px">
+  <a href="/" class="icon-btn" aria-label="Voltar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></a>
+  <div style="display:flex; flex-direction:column; gap:8px">
+    <span style="font-size:13px; font-weight:600; color:var(--indigo)">Coleção</span>
+    <h1 style="margin:0; font-size:28px; line-height:1.2; font-weight:700">{{ colecao['name'] }}</h1>
+    {% if colecao['description'] %}<p style="margin:0; font-size:15px; line-height:1.5; color:var(--text-soft)">{{ colecao['description'] }}</p>{% endif %}
+  </div>
+  <div class="lista-anteriores">
+    {% for d in devs %}
+    <a href="/d/{{ d['slug'] }}" class="item-anterior">
+      <span><span class="titulo">{{ d['titulo'] }}</span><br><span class="meta">{{ d['data'] }} · {{ feitos[d['slug']] }} de {{ total_passos }} passos</span></span>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5B6180" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+    </a>
+    {% else %}
+    <p style="margin:0; color:var(--text-soft); font-size:14px">Esta coleção ainda não tem devocionais.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

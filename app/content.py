@@ -34,6 +34,19 @@ def list_devotionals() -> list[dict]:
     return items
 
 
+def list_by_collection(colecao_id: int) -> list[dict]:
+    return [d for d in list_devotionals() if d.get("colecao_id") == colecao_id]
+
+
+def count_by_collection() -> dict[int, int]:
+    contagem: dict[int, int] = {}
+    for d in list_devotionals():
+        cid = d.get("colecao_id")
+        if cid is not None:
+            contagem[cid] = contagem.get(cid, 0) + 1
+    return contagem
+
+
 def get_devotional(slug: str) -> dict | None:
     if not slug_valido(slug):
         return None

@@ -1,38 +1,21 @@
 {% extends "base.html" %}
-{% block title %}Esqueci meu PIN{% endblock %}
+{% block title %}Esqueci minha senha{% endblock %}
 {% block content %}
 <div class="login-wrap">
   <div style="text-align:center; display:flex; flex-direction:column; gap:6px">
-    <h1 style="margin:0; font-size:24px; font-weight:700">Esqueci meu PIN</h1>
-    <p style="margin:0; color:var(--text-soft); font-size:15px; line-height:1.5">Escolha quem é você. Enviamos um link para o e-mail cadastrado para você criar um PIN novo.</p>
+    <h1 style="margin:0; font-size:24px; font-weight:700">Esqueci minha senha</h1>
+    <p style="margin:0; color:var(--text-soft); font-size:15px; line-height:1.5">Digite seu e-mail. Se ele estiver cadastrado, enviamos um link para criar uma senha nova.</p>
   </div>
   {% if enviado %}
-    <div class="explicacao"><span class="ok">Link enviado para {{ enviado }}.</span><p style="margin:0; font-size:14px; color:var(--text-soft)">Vale por 30 minutos. Se não chegar, confira o spam.</p></div>
+    <div class="explicacao"><span class="ok">Se o e-mail estiver cadastrado, o link já foi enviado.</span><p style="margin:0; font-size:14px; color:var(--text-soft)">Vale por 30 minutos. Se não chegar, confira o spam.</p></div>
   {% endif %}
   {% if erro_msg %}<p class="erro">{{ erro_msg }}</p>{% endif %}
-  {% if not email_habilitado %}
-    <p class="erro">Envio de e-mail não está configurado. Peça o PIN ao administrador.</p>
-  {% else %}
-  <form method="post" action="/esqueci" style="display:flex; flex-direction:column; gap:20px">
-    <input type="hidden" name="member_id" id="member_id">
-    <div class="membro-grid">
-      {% for m in members %}
-        <button type="button" class="membro-btn" data-id="{{ m['id'] }}" onclick="selecionar(this)">
-          <span class="familia-avatar" style="width:48px;height:48px;border-radius:24px">{{ m['name'][:1] }}</span>
-          <span style="font-weight:600; font-size:14px">{{ m['name'] }}</span>
-        </button>
-      {% endfor %}
-    </div>
-    <button type="submit" class="btn-primary">Enviar link</button>
+  {% if email_habilitado %}
+  <form method="post" action="/esqueci" style="display:flex; flex-direction:column; gap:14px">
+    <div class="campo"><label for="email">E-mail</label><input id="email" name="email" type="email" required autocomplete="email" inputmode="email" autocapitalize="none"></div>
+    <button type="submit" class="btn-primary" style="margin-top:6px">Enviar link</button>
   </form>
   {% endif %}
-  <a href="/login" style="text-align:center; font-size:14px; color:var(--indigo); font-weight:600; text-decoration:none">Voltar ao login</a>
+  <a href="/login" style="text-align:center; font-size:14px; font-weight:600">Voltar ao login</a>
 </div>
-<script>
-function selecionar(btn) {
-  document.querySelectorAll('.membro-btn').forEach(b => b.classList.remove('selecionado'));
-  btn.classList.add('selecionado');
-  document.getElementById('member_id').value = btn.dataset.id;
-}
-</script>
 {% endblock %}

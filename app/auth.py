@@ -1,6 +1,9 @@
-"""Login simples por nome + PIN, sessão guardada em cookie assinado."""
+"""Login por e-mail + senha, sessão guardada em cookie assinado."""
 import os
 import time
+import hmac
+import hashlib
+import secrets
 import threading
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 from fastapi import Request, HTTPException
@@ -20,36 +23,63 @@ MAX_AGE = 60 * 60 * 24 * 90  # 90 dias — a família não deve logar toda hora
 # para testar em http://localhost, exporte COOKIE_SECURE=0.
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "1") != "0"
 
-# Proteção contra força bruta no PIN: após MAX_TENTATIVAS erros seguidos para o
-# mesmo membro, o login dele fica bloqueado por BLOQUEIO_SEGUNDOS.
+SENHA_MIN = 6
+
+# ---------- Senhas (PBKDF2 da biblioteca padrão, sem dependência extra) ----------
+
+_ITERACOES = 200_000
+
+
+def hash_senha(senha: str) -> str:
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", senha.encode("utf-8"), bytes.fromhex(salt), _ITERACOES).hex()
+    return f"pbkdf2${_ITERACOES}${salt}${digest}"
+
+
+def verificar_senha(senha: str, armazenado: str | None) -> bool:
+    if not armazenado:
+        return False
+    try:
+        _, iteracoes, salt, digest = armazenado.split("$")
+        calc = hashlib.pbkdf2_hmac("sha256", senha.encode("utf-8"), bytes.fromhex(salt), int(iteracoes)).hex()
+        return hmac.compare_digest(calc, digest)
+    except (ValueError, TypeError):
+        return False
+
+
+# ---------- Proteção contra força bruta ----------
+# Após MAX_TENTATIVAS erros seguidos para o mesmo e-mail, o login dele fica
+# bloqueado por BLOQUEIO_SEGUNDOS. Contador em memória (zera ao reiniciar).
+
 MAX_TENTATIVAS = 5
 BLOQUEIO_SEGUNDOS = 15 * 60
-_tentativas: dict[int, tuple[int, float]] = {}  # member_id -> (erros, bloqueado_ate)
+_tentativas: dict[str, tuple[int, float]] = {}  # email -> (erros, bloqueado_ate)
 _lock = threading.Lock()
 
 
-def bloqueado_por(member_id: int) -> int:
+def bloqueado_por(chave: str) -> int:
     """Segundos restantes de bloqueio (0 se pode tentar)."""
     with _lock:
-        erros, ate = _tentativas.get(member_id, (0, 0.0))
-        restante = int(ate - time.time())
-        return max(restante, 0)
+        _, ate = _tentativas.get(chave, (0, 0.0))
+        return max(int(ate - time.time()), 0)
 
 
-def registrar_erro(member_id: int) -> None:
+def registrar_erro(chave: str) -> None:
     with _lock:
-        erros, ate = _tentativas.get(member_id, (0, 0.0))
+        erros, ate = _tentativas.get(chave, (0, 0.0))
         erros += 1
         if erros >= MAX_TENTATIVAS:
-            _tentativas[member_id] = (0, time.time() + BLOQUEIO_SEGUNDOS)
+            _tentativas[chave] = (0, time.time() + BLOQUEIO_SEGUNDOS)
         else:
-            _tentativas[member_id] = (erros, ate)
+            _tentativas[chave] = (erros, ate)
 
 
-def registrar_acerto(member_id: int) -> None:
+def registrar_acerto(chave: str) -> None:
     with _lock:
-        _tentativas.pop(member_id, None)
+        _tentativas.pop(chave, None)
 
+
+# ---------- Sessão ----------
 
 def make_session_cookie(member_id: int) -> str:
     return serializer.dumps({"member_id": member_id})
@@ -73,7 +103,7 @@ def current_member(request: Request) -> dict | None:
     if member_id is None:
         return None
     with db.session() as conn:
-        row = conn.execute("SELECT * FROM members WHERE id = ?", (member_id,)).fetchone()
+        row = conn.execute("SELECT * FROM members WHERE id = ? AND status = 'ativo'", (member_id,)).fetchone()
         return dict(row) if row else None
 
 

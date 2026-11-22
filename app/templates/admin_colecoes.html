@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Coleções{% endblock %}
+{% block content %}
+<div class="main" style="padding-top:28px">
+  <div class="topbar" style="padding:0">
+    <a href="/admin" class="icon-btn" aria-label="Voltar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></a>
+    <h1 style="margin:0; font-size:22px; font-weight:700">Coleções</h1>
+    <span style="width:44px"></span>
+  </div>
+
+  {% if ok_msg %}<div class="explicacao"><span class="ok">{{ ok_msg }}</span></div>{% endif %}
+  {% if erro_msg %}<p class="erro">{{ erro_msg }}</p>{% endif %}
+
+  <form method="post" action="/admin/colecoes" class="cartao">
+    <h2 class="section-title">Nova coleção</h2>
+    <div class="campo"><label for="nome">Nome</label><input id="nome" name="nome" type="text" required maxlength="80" placeholder="Ex.: Salmos para a semana"></div>
+    <div class="campo"><label for="descricao">Descrição</label><textarea id="descricao" name="descricao" class="nota" style="height:90px; font-family:inherit; font-size:15px" maxlength="500" placeholder="O que a família vai encontrar nesta coleção"></textarea></div>
+    <button type="submit" class="btn-primary" style="height:46px">Criar coleção</button>
+  </form>
+
+  <h2 class="section-title">Existentes ({{ colecoes | length }})</h2>
+  {% for c in colecoes %}
+  <form method="post" action="/admin/colecoes/{{ c['id'] }}/editar" class="cartao">
+    <div class="campo"><label for="nome-{{ c['id'] }}">Nome</label><input id="nome-{{ c['id'] }}" name="nome" type="text" value="{{ c['name'] }}" required maxlength="80"></div>
+    <div class="campo"><label for="desc-{{ c['id'] }}">Descrição</label><textarea id="desc-{{ c['id'] }}" name="descricao" class="nota" style="height:80px; font-family:inherit; font-size:15px" maxlength="500">{{ c['description'] }}</textarea></div>
+    <span style="font-size:13px; color:var(--text-soft)">{{ c['total'] }} devocion{{ 'al' if c['total'] == 1 else 'ais' }} · <a href="/colecao/{{ c['id'] }}">ver como membro</a></span>
+    <div class="acoes">
+      <button type="submit" class="btn-secondary" style="flex:1">Salvar</button>
+      <button type="submit" class="btn-danger" formaction="/admin/colecoes/{{ c['id'] }}/excluir" {% if c['total'] %}disabled title="Tem devocionais"{% else %}onclick="return confirm('Excluir a coleção {{ c['name'] }}?')"{% endif %}>Excluir</button>
+    </div>
+  </form>
+  {% else %}
+  <p style="margin:0; color:var(--text-soft); font-size:14px">Nenhuma coleção ainda.</p>
+  {% endfor %}
+</div>
+{% endblock %}

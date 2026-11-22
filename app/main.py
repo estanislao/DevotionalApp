@@ -1,15 +1,15 @@
 """Portal de devocionais — app único (FastAPI).
 
 Rotas principais:
-  /                         início
-  /login                    entrar com nome + PIN
+  /                         início (abas Coleção e Últimas)
+  /login, /cadastro         entrar com e-mail + senha; criar conta (aprovada pelo admin)
+  /esqueci, /redefinir/..   recuperar senha por e-mail
+  /colecao/{id}             devocionais de uma coleção
   /d/{slug}                 trilha da devocional (5 passos)
-  /d/{slug}/ouvir           player de áudio
-  /d/{slug}/ler             texto
-  /d/{slug}/slides          apresentação (PDF embutido)
-  /d/{slug}/quiz            quiz
-  /d/{slug}/praticar        lições práticas + anotação
-  /admin                    só para o administrador: publicar nova devocional
+  /d/{slug}/ouvir|ler|slides|quiz|praticar
+  /admin                    publicar nova devocional
+  /admin/membros            inscrições pendentes, membros ativos
+  /admin/colecoes           criar e editar coleções
 """
 import os
 import re
@@ -39,49 +39,37 @@ LIMITE_PDF = 50 * 1024 * 1024
 LIMITE_TEXTO = 2 * 1024 * 1024
 EXT_AUDIO = {".mp3", ".m4a", ".aac", ".ogg", ".wav"}
 EXT_PDF = {".pdf"}
-PIN_RE = re.compile(r"^\d{4,6}$")
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 RESET_VALIDADE = timedelta(minutes=30)
-RESET_INTERVALO = timedelta(minutes=5)   # um e-mail por membro a cada 5 min
+RESET_INTERVALO = timedelta(minutes=5)   # um e-mail por conta a cada 5 min
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
+APP_NOME = "Portal de Devocionais"
 
 
 def agora() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def parse_seed(seed_raw: str) -> list[dict]:
-    """Formato: "Nome:PIN:admin,Nome2:PIN2" — ':admin' é opcional."""
-    seed = []
-    for item in seed_raw.split(","):
-        item = item.strip()
-        if not item:
-            continue
-        parts = [p.strip() for p in item.split(":")]
-        if len(parts) < 2 or not parts[0] or not parts[1]:
-            raise RuntimeError(f"SEED_MEMBERS inválido no trecho '{item}'. Use Nome:PIN ou Nome:PIN:admin.")
-        seed.append({"name": parts[0], "pin": parts[1],
-                     "is_admin": len(parts) > 2 and parts[2].lower() == "admin"})
-    return seed
+def ler_admin_env() -> dict | None:
+    email = os.environ.get("ADMIN_EMAIL", "").strip().lower()
+    senha = os.environ.get("ADMIN_PASSWORD", "")
+    nome = os.environ.get("ADMIN_NAME", "Administrador").strip() or "Administrador"
+    if not email and not senha:
+        return None
+    if not EMAIL_RE.match(email) or len(senha) < auth.SENHA_MIN:
+        raise RuntimeError("ADMIN_EMAIL precisa ser um e-mail válido e ADMIN_PASSWORD ter pelo menos "
+                           f"{auth.SENHA_MIN} caracteres (veja .env.example).")
+    return {"name": nome, "email": email, "password_hash": auth.hash_senha(senha)}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    seed_raw = os.environ.get("SEED_MEMBERS", "")
-    if seed_raw:
-        seed = parse_seed(seed_raw)
-    else:
-        seed = [
-            {"name": "Membro 1", "pin": "1111", "is_admin": True},
-            {"name": "Membro 2", "pin": "2222"},
-            {"name": "Membro 3", "pin": "3333"},
-            {"name": "Membro 4", "pin": "4444"},
-        ]
-    db.init_db(seed)
+    db.init_db(ler_admin_env())
     DEVOCIONAIS_DIR.mkdir(parents=True, exist_ok=True)
     yield
 
 
-app = FastAPI(title="Portal de Devocionais", lifespan=lifespan)
+app = FastAPI(title=APP_NOME, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
@@ -110,8 +98,6 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    if request.url.path == "/login":
-        return RedirectResponse("/login?erro=membro", status_code=303)
     return pagina_erro(request, 400, "Dados incompletos", "O formulário veio incompleto. Volte e tente de novo.")
 
 
@@ -139,38 +125,71 @@ def devo_ou_404(slug: str) -> dict:
     return devo
 
 
-# ---------- Login ----------
+def colecoes_por_id(conn) -> dict[int, dict]:
+    return {r["id"]: dict(r) for r in conn.execute("SELECT * FROM collections ORDER BY name").fetchall()}
+
+
+def anexar_colecao(devs: list[dict], mapa: dict[int, dict]) -> list[dict]:
+    for d in devs:
+        c = mapa.get(d.get("colecao_id"))
+        d["colecao_nome"] = c["name"] if c else None
+    return devs
+
+
+def primeiro_nome(nome: str) -> str:
+    return nome.strip().split(" ")[0] if nome else ""
+
+
+def enviar_email_silencioso(para: str, assunto: str, texto: str, html: str) -> None:
+    """Para avisos que não podem travar o fluxo (ex.: admin avisado de inscrição nova)."""
+    try:
+        mailer.enviar(para, assunto, texto, html)
+    except RuntimeError:
+        pass
+
+
+def botao_email(link: str, rotulo: str) -> str:
+    return (f'<a href="{link}" style="display:inline-block;padding:12px 20px;background:#2E3192;color:#fff;'
+            f'border-radius:10px;text-decoration:none;font-weight:600">{rotulo}</a>')
+
+
+# ---------- Login / cadastro / logout ----------
 
 @app.get("/login", response_class=HTMLResponse)
 def login_form(request: Request):
     if auth.current_member(request):
         return RedirectResponse("/")
-    with db.session() as conn:
-        members = conn.execute("SELECT id, name FROM members ORDER BY id").fetchall()
     erro = request.query_params.get("erro")
     mensagens = {
-        "1": "PIN incorreto. Tente novamente.",
-        "membro": "Escolha quem é você antes de digitar o PIN.",
+        "1": "E-mail ou senha incorretos.",
+        "pendente": "Sua inscrição ainda não foi aprovada pelo administrador.",
         "bloqueado": "Muitas tentativas erradas. Espere alguns minutos e tente de novo.",
     }
     ok = request.query_params.get("ok")
-    ok_msgs = {"pin": "PIN redefinido. Entre com o novo."}
+    ok_msgs = {
+        "senha": "Senha redefinida. Entre com a nova.",
+        "cadastro": "Inscrição enviada! Você poderá entrar assim que o administrador aprovar.",
+    }
     return templates.TemplateResponse(request, "login.html", {
-        "members": members, "erro_msg": mensagens.get(erro), "ok_msg": ok_msgs.get(ok),
+        "erro_msg": mensagens.get(erro), "ok_msg": ok_msgs.get(ok),
         "email_habilitado": mailer.email_habilitado(),
+        "email": request.query_params.get("email", ""),
     })
 
 
 @app.post("/login")
-def login_submit(member_id: int = Form(...), pin: str = Form(...)):
-    if auth.bloqueado_por(member_id) > 0:
+def login_submit(email: str = Form(...), senha: str = Form(...)):
+    email = email.strip().lower()
+    if auth.bloqueado_por(email) > 0:
         return RedirectResponse("/login?erro=bloqueado", status_code=303)
     with db.session() as conn:
-        row = conn.execute("SELECT * FROM members WHERE id=?", (member_id,)).fetchone()
-    if not row or row["pin"] != pin.strip():
-        auth.registrar_erro(member_id)
-        return RedirectResponse("/login?erro=1", status_code=303)
-    auth.registrar_acerto(member_id)
+        row = conn.execute("SELECT * FROM members WHERE email=?", (email,)).fetchone()
+    if not row or not auth.verificar_senha(senha, row["password_hash"]):
+        auth.registrar_erro(email)
+        return RedirectResponse(f"/login?erro=1&email={quote(email)}", status_code=303)
+    if row["status"] != "ativo":
+        return RedirectResponse("/login?erro=pendente", status_code=303)
+    auth.registrar_acerto(email)
     resp = RedirectResponse("/", status_code=303)
     resp.set_cookie(
         auth.COOKIE_NAME,
@@ -190,6 +209,148 @@ def logout():
     return resp
 
 
+@app.get("/cadastro", response_class=HTMLResponse)
+def cadastro_form(request: Request):
+    if auth.current_member(request):
+        return RedirectResponse("/")
+    return templates.TemplateResponse(request, "cadastro.html", {
+        "erro_msg": request.query_params.get("erro"),
+        "nome": request.query_params.get("nome", ""),
+        "email": request.query_params.get("email", ""),
+        "senha_min": auth.SENHA_MIN,
+    })
+
+
+@app.post("/cadastro")
+def cadastro_submit(nome: str = Form(...), email: str = Form(...), senha: str = Form(...), senha2: str = Form(...)):
+    nome, email = nome.strip()[:60], email.strip().lower()
+
+    def volta(msg: str):
+        return RedirectResponse(f"/cadastro?erro={quote(msg)}&nome={quote(nome)}&email={quote(email)}", status_code=303)
+
+    if len(nome) < 2:
+        return volta("Digite seu nome.")
+    if not EMAIL_RE.match(email):
+        return volta("E-mail inválido.")
+    if len(senha) < auth.SENHA_MIN:
+        return volta(f"A senha precisa ter pelo menos {auth.SENHA_MIN} caracteres.")
+    if senha != senha2:
+        return volta("As duas senhas não são iguais.")
+    with db.session() as conn:
+        if conn.execute("SELECT 1 FROM members WHERE email=?", (email,)).fetchone():
+            return volta("Já existe uma conta com esse e-mail. Use 'Esqueci minha senha' se precisar.")
+        conn.execute(
+            "INSERT INTO members (name, email, password_hash, pin, is_admin, status, created_at) VALUES (?,?,?,'',0,'pendente',?)",
+            (nome, email, auth.hash_senha(senha), agora()),
+        )
+        admins = [r["email"] for r in conn.execute(
+            "SELECT email FROM members WHERE is_admin=1 AND email IS NOT NULL").fetchall()]
+    if mailer.email_habilitado():
+        link = f"{PUBLIC_URL}/admin/membros" if PUBLIC_URL else "/admin/membros"
+        for adm in admins:
+            enviar_email_silencioso(
+                adm, f"{APP_NOME}: nova inscrição de {nome}",
+                f"{nome} ({email}) pediu para entrar no {APP_NOME}.\n\nAprove ou recuse em: {link}",
+                f"<p><strong>{nome}</strong> ({email}) pediu para entrar no {APP_NOME}.</p>"
+                f"<p>{botao_email(link, 'Ver inscrições')}</p>",
+            )
+    return RedirectResponse("/login?ok=cadastro", status_code=303)
+
+
+# ---------- Esqueci minha senha ----------
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+@app.get("/esqueci", response_class=HTMLResponse)
+def esqueci_form(request: Request):
+    if auth.current_member(request):
+        return RedirectResponse("/")
+    return templates.TemplateResponse(request, "esqueci.html", {
+        "email_habilitado": mailer.email_habilitado(),
+        "enviado": request.query_params.get("enviado"),
+        "erro_msg": request.query_params.get("erro"),
+    })
+
+
+@app.post("/esqueci")
+def esqueci_enviar(request: Request, email: str = Form(...)):
+    email = email.strip().lower()
+    if not mailer.email_habilitado():
+        return RedirectResponse(f"/esqueci?erro={quote('Envio de e-mail não está configurado. Fale com o administrador.')}", status_code=303)
+    # Resposta é a mesma exista a conta ou não (não revela quem está cadastrado).
+    enviado = RedirectResponse("/esqueci?enviado=1", status_code=303)
+    with db.session() as conn:
+        row = conn.execute("SELECT id, name, email FROM members WHERE email=? AND status='ativo'", (email,)).fetchone()
+        if not row:
+            return enviado
+        ultimo = conn.execute(
+            "SELECT created_at FROM pin_resets WHERE member_id=? ORDER BY id DESC LIMIT 1", (row["id"],)
+        ).fetchone()
+        if ultimo and datetime.fromisoformat(ultimo["created_at"]) + RESET_INTERVALO > datetime.now(timezone.utc):
+            return enviado
+        token = secrets.token_urlsafe(32)
+        agora_dt = datetime.now(timezone.utc)
+        conn.execute(
+            "INSERT INTO pin_resets (member_id, token_hash, created_at, expires_at) VALUES (?,?,?,?)",
+            (row["id"], _hash_token(token), agora_dt.isoformat(), (agora_dt + RESET_VALIDADE).isoformat()),
+        )
+    base = PUBLIC_URL or str(request.base_url).rstrip("/")
+    link = f"{base}/redefinir/{token}"
+    texto = (f"Olá, {primeiro_nome(row['name'])}.\n\nPara criar uma nova senha no {APP_NOME}, abra este link "
+             f"(vale por 30 minutos):\n\n{link}\n\nSe não foi você que pediu, ignore este e-mail.")
+    html = (f"<p>Olá, {primeiro_nome(row['name'])}.</p><p>Para criar uma nova senha no {APP_NOME}, toque no botão "
+            f"abaixo (vale por 30 minutos):</p><p>{botao_email(link, 'Criar nova senha')}</p>"
+            f'<p style="color:#666;font-size:13px">Se não foi você que pediu, ignore este e-mail.<br>Link: {link}</p>')
+    enviar_email_silencioso(row["email"], "Sua nova senha no Portal de Devocionais", texto, html)
+    return enviado
+
+
+def _reset_valido(conn, token: str):
+    row = conn.execute("SELECT * FROM pin_resets WHERE token_hash=?", (_hash_token(token),)).fetchone()
+    if not row or row["used_at"]:
+        return None
+    if datetime.fromisoformat(row["expires_at"]) < datetime.now(timezone.utc):
+        return None
+    return row
+
+
+LINK_VENCIDO = ("Link inválido ou vencido",
+                "Esse link já foi usado ou passou dos 30 minutos. Peça um novo em 'Esqueci minha senha'.")
+
+
+@app.get("/redefinir/{token}", response_class=HTMLResponse)
+def redefinir_form(request: Request, token: str):
+    with db.session() as conn:
+        reset = _reset_valido(conn, token)
+        if not reset:
+            return pagina_erro(request, 400, *LINK_VENCIDO)
+        membro = conn.execute("SELECT name FROM members WHERE id=?", (reset["member_id"],)).fetchone()
+    return templates.TemplateResponse(request, "redefinir.html", {
+        "token": token, "nome": primeiro_nome(membro["name"]),
+        "erro_msg": request.query_params.get("erro"), "senha_min": auth.SENHA_MIN,
+    })
+
+
+@app.post("/redefinir/{token}")
+def redefinir_salvar(request: Request, token: str, senha: str = Form(...), senha2: str = Form(...)):
+    if len(senha) < auth.SENHA_MIN:
+        return RedirectResponse(f"/redefinir/{token}?erro={quote(f'A senha precisa ter pelo menos {auth.SENHA_MIN} caracteres.')}", status_code=303)
+    if senha != senha2:
+        return RedirectResponse(f"/redefinir/{token}?erro={quote('As duas senhas não são iguais.')}", status_code=303)
+    with db.session() as conn:
+        reset = _reset_valido(conn, token)
+        if not reset:
+            return pagina_erro(request, 400, *LINK_VENCIDO)
+        conn.execute("UPDATE members SET password_hash=? WHERE id=?", (auth.hash_senha(senha), reset["member_id"]))
+        conn.execute("UPDATE pin_resets SET used_at=? WHERE id=?", (agora(), reset["id"]))
+        email = conn.execute("SELECT email FROM members WHERE id=?", (reset["member_id"],)).fetchone()["email"]
+    if email:
+        auth.registrar_acerto(email)
+    return RedirectResponse("/login?ok=senha", status_code=303)
+
+
 # ---------- Início ----------
 
 @app.get("/", response_class=HTMLResponse)
@@ -198,25 +359,43 @@ def home(request: Request):
     if not member:
         return RedirectResponse("/login")
 
-    devotionals = content.list_devotionals()
-    destaque = devotionals[0] if devotionals else None
-    anteriores = devotionals[1:6]
-
     with db.session() as conn:
-        members = conn.execute("SELECT id, name FROM members ORDER BY id").fetchall()
+        mapa = colecoes_por_id(conn)
+        devotionals = anexar_colecao(content.list_devotionals(), mapa)
+        destaque = devotionals[0] if devotionals else None
+        ultimas = devotionals[:10]
+        contagem = content.count_by_collection()
+        colecoes = [dict(c, total=contagem.get(c["id"], 0)) for c in mapa.values()]
+        avulsas = sum(1 for d in devotionals if d.get("colecao_id") not in mapa)
+
+        members = conn.execute("SELECT id, name FROM members WHERE status='ativo' ORDER BY id").fetchall()
         familia = []
         for m in members:
-            done = 0
-            if destaque:
-                done = len(progress_for(conn, m["id"], destaque["slug"]))
-            familia.append({"name": m["name"], "done": done, "total": len(content.STEPS)})
-        meu_progresso = 0
-        if destaque:
-            meu_progresso = len(progress_for(conn, member["id"], destaque["slug"]))
+            done = len(progress_for(conn, m["id"], destaque["slug"])) if destaque else 0
+            familia.append({"name": primeiro_nome(m["name"]), "done": done, "total": len(content.STEPS)})
+        meu_progresso = len(progress_for(conn, member["id"], destaque["slug"])) if destaque else 0
+        pendentes = conn.execute("SELECT COUNT(*) FROM members WHERE status='pendente'").fetchone()[0] if member["is_admin"] else 0
 
-    return templates.TemplateResponse(request, "index.html", {"member": member, "destaque": destaque,
-        "anteriores": anteriores, "familia": familia,
-        "meu_progresso": meu_progresso, "total_passos": len(content.STEPS),
+    return templates.TemplateResponse(request, "index.html", {
+        "member": member, "destaque": destaque, "ultimas": ultimas, "colecoes": colecoes, "avulsas": avulsas,
+        "familia": familia, "meu_progresso": meu_progresso, "total_passos": len(content.STEPS),
+        "aba": request.query_params.get("aba", "colecao"), "pendentes": pendentes,
+    })
+
+
+@app.get("/colecao/{colecao_id}", response_class=HTMLResponse)
+def ver_colecao(request: Request, colecao_id: int):
+    member = auth.require_member(request)
+    with db.session() as conn:
+        col = conn.execute("SELECT * FROM collections WHERE id=?", (colecao_id,)).fetchone()
+        if not col:
+            raise HTTPException(404, "Coleção não encontrada.")
+        devs = content.list_by_collection(colecao_id)
+        feitos = {}
+        for d in devs:
+            feitos[d["slug"]] = len(progress_for(conn, member["id"], d["slug"]))
+    return templates.TemplateResponse(request, "colecao.html", {
+        "colecao": dict(col), "devs": devs, "feitos": feitos, "total_passos": len(content.STEPS),
     })
 
 
@@ -228,6 +407,7 @@ def devocional_trilha(request: Request, slug: str):
     devo = devo_ou_404(slug)
     with db.session() as conn:
         feitos = progress_for(conn, member["id"], slug)
+        anexar_colecao([devo], colecoes_por_id(conn))
     return templates.TemplateResponse(request, "devocional.html", {"devo": devo, "feitos": feitos, "steps": content.STEPS,
     })
 
@@ -361,155 +541,19 @@ def midia(request: Request, slug: str, filename: str):
     return FileResponse(path)
 
 
-# ---------- Admin ----------
+# ---------- Admin: publicar ----------
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_home(request: Request):
     auth.require_admin(request)
-    devotionals = content.list_devotionals()
+    with db.session() as conn:
+        mapa = colecoes_por_id(conn)
+        pendentes = conn.execute("SELECT COUNT(*) FROM members WHERE status='pendente'").fetchone()[0]
     return templates.TemplateResponse(request, "admin.html", {
-        "devotionals": devotionals,
+        "devotionals": anexar_colecao(content.list_devotionals(), mapa),
+        "colecoes": list(mapa.values()), "pendentes": pendentes,
         "erro_msg": request.query_params.get("erro"),
     })
-
-
-# ---------- Admin: membros (trocar PIN, cadastrar e-mail) ----------
-
-@app.get("/admin/membros", response_class=HTMLResponse)
-def admin_membros(request: Request):
-    auth.require_admin(request)
-    with db.session() as conn:
-        members = conn.execute("SELECT id, name, email, is_admin FROM members ORDER BY id").fetchall()
-    return templates.TemplateResponse(request, "admin_membros.html", {
-        "members": members,
-        "ok_msg": request.query_params.get("ok"),
-        "erro_msg": request.query_params.get("erro"),
-        "email_habilitado": mailer.email_habilitado(),
-    })
-
-
-@app.post("/admin/membros/{member_id}")
-def admin_membro_salvar(request: Request, member_id: int, pin: str = Form(""), email: str = Form("")):
-    auth.require_admin(request)
-    pin, email = pin.strip(), email.strip().lower()
-
-    def volta(param: str, msg: str):
-        return RedirectResponse(f"/admin/membros?{param}={quote(msg)}", status_code=303)
-
-    if pin and not PIN_RE.match(pin):
-        return volta("erro", "PIN deve ter de 4 a 6 números.")
-    if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
-        return volta("erro", "E-mail inválido.")
-    with db.session() as conn:
-        row = conn.execute("SELECT id, name FROM members WHERE id=?", (member_id,)).fetchone()
-        if not row:
-            raise HTTPException(404, "Membro não encontrado.")
-        conn.execute("UPDATE members SET email=? WHERE id=?", (email or None, member_id))
-        if pin:
-            conn.execute("UPDATE members SET pin=? WHERE id=?", (pin, member_id))
-            auth.registrar_acerto(member_id)  # zera bloqueio de tentativas
-    feito = "PIN e e-mail" if pin else "E-mail"
-    return volta("ok", f"{feito} de {row['name']} salvo.")
-
-
-# ---------- Esqueci meu PIN (link por e-mail) ----------
-
-def _hash_token(token: str) -> str:
-    return hashlib.sha256(token.encode()).hexdigest()
-
-
-@app.get("/esqueci", response_class=HTMLResponse)
-def esqueci_form(request: Request):
-    if auth.current_member(request):
-        return RedirectResponse("/")
-    with db.session() as conn:
-        members = conn.execute("SELECT id, name FROM members ORDER BY id").fetchall()
-    return templates.TemplateResponse(request, "esqueci.html", {
-        "members": members,
-        "email_habilitado": mailer.email_habilitado(),
-        "enviado": request.query_params.get("enviado"),
-        "erro_msg": request.query_params.get("erro"),
-    })
-
-
-@app.post("/esqueci")
-def esqueci_enviar(request: Request, member_id: int = Form(...)):
-    def volta(param: str, msg: str):
-        return RedirectResponse(f"/esqueci?{param}={quote(msg)}", status_code=303)
-
-    if not mailer.email_habilitado():
-        return volta("erro", "Envio de e-mail não está configurado. Peça o PIN ao administrador.")
-    with db.session() as conn:
-        row = conn.execute("SELECT id, name, email FROM members WHERE id=?", (member_id,)).fetchone()
-        if not row:
-            return volta("erro", "Membro não encontrado.")
-        if not row["email"]:
-            return volta("erro", f"{row['name']} não tem e-mail cadastrado. Peça ao administrador para cadastrar ou redefinir o PIN.")
-        ultimo = conn.execute(
-            "SELECT created_at FROM pin_resets WHERE member_id=? ORDER BY id DESC LIMIT 1", (member_id,)
-        ).fetchone()
-        if ultimo and datetime.fromisoformat(ultimo["created_at"]) + RESET_INTERVALO > datetime.now(timezone.utc):
-            return volta("erro", "Já enviamos um link há pouco. Confira a caixa de entrada e o spam, ou espere 5 minutos.")
-        token = secrets.token_urlsafe(32)
-        agora_dt = datetime.now(timezone.utc)
-        conn.execute(
-            "INSERT INTO pin_resets (member_id, token_hash, created_at, expires_at) VALUES (?,?,?,?)",
-            (member_id, _hash_token(token), agora_dt.isoformat(), (agora_dt + RESET_VALIDADE).isoformat()),
-        )
-    base = PUBLIC_URL or str(request.base_url).rstrip("/")
-    link = f"{base}/redefinir/{token}"
-    texto = (f"Olá, {row['name']}.\n\nPara criar um novo PIN no Portal de Devocionais, abra este link "
-             f"(vale por 30 minutos):\n\n{link}\n\nSe não foi você que pediu, ignore este e-mail.")
-    html = (f"<p>Olá, {row['name']}.</p><p>Para criar um novo PIN no Portal de Devocionais, toque no botão abaixo "
-            f"(vale por 30 minutos):</p><p><a href=\"{link}\" style=\"display:inline-block;padding:12px 20px;"
-            f"background:#2E3192;color:#fff;border-radius:10px;text-decoration:none;font-weight:600\">Criar novo PIN</a></p>"
-            f"<p style=\"color:#666;font-size:13px\">Se não foi você que pediu, ignore este e-mail.<br>Link: {link}</p>")
-    try:
-        mailer.enviar(row["email"], "Seu link para criar um novo PIN", texto, html)
-    except RuntimeError as e:
-        return volta("erro", f"Não conseguimos enviar o e-mail: {e}")
-    mascarado = re.sub(r"^(.).*?(@.*)$", r"\1***\2", row["email"])
-    return volta("enviado", mascarado)
-
-
-def _reset_valido(conn, token: str):
-    row = conn.execute("SELECT * FROM pin_resets WHERE token_hash=?", (_hash_token(token),)).fetchone()
-    if not row or row["used_at"]:
-        return None
-    if datetime.fromisoformat(row["expires_at"]) < datetime.now(timezone.utc):
-        return None
-    return row
-
-
-@app.get("/redefinir/{token}", response_class=HTMLResponse)
-def redefinir_form(request: Request, token: str):
-    with db.session() as conn:
-        reset = _reset_valido(conn, token)
-        if not reset:
-            return pagina_erro(request, 400, "Link inválido ou vencido",
-                               "Esse link já foi usado ou passou dos 30 minutos. Peça um novo em 'Esqueci meu PIN'.")
-        membro = conn.execute("SELECT name FROM members WHERE id=?", (reset["member_id"],)).fetchone()
-    return templates.TemplateResponse(request, "redefinir.html", {
-        "token": token, "nome": membro["name"], "erro_msg": request.query_params.get("erro"),
-    })
-
-
-@app.post("/redefinir/{token}")
-def redefinir_salvar(request: Request, token: str, pin: str = Form(...), pin2: str = Form(...)):
-    pin, pin2 = pin.strip(), pin2.strip()
-    if not PIN_RE.match(pin):
-        return RedirectResponse(f"/redefinir/{token}?erro={quote('PIN deve ter de 4 a 6 números.')}", status_code=303)
-    if pin != pin2:
-        return RedirectResponse(f"/redefinir/{token}?erro={quote('Os dois PINs não são iguais.')}", status_code=303)
-    with db.session() as conn:
-        reset = _reset_valido(conn, token)
-        if not reset:
-            return pagina_erro(request, 400, "Link inválido ou vencido",
-                               "Esse link já foi usado ou passou dos 30 minutos. Peça um novo em 'Esqueci meu PIN'.")
-        conn.execute("UPDATE members SET pin=? WHERE id=?", (pin, reset["member_id"]))
-        conn.execute("UPDATE pin_resets SET used_at=? WHERE id=?", (agora(), reset["id"]))
-        auth.registrar_acerto(reset["member_id"])
-    return RedirectResponse("/login?ok=pin", status_code=303)
 
 
 def slugify(s: str) -> str:
@@ -539,6 +583,7 @@ async def admin_publicar(
     titulo: str = Form(...),
     data: str = Form(...),
     versiculo: str = Form(""),
+    colecao_id: str = Form(""),
     texto: UploadFile = File(...),
     audio: UploadFile = File(...),
     apresentacao: UploadFile = File(...),
@@ -561,6 +606,16 @@ async def admin_publicar(
     titulo_slug = slugify(titulo)
     if not titulo_slug:
         return falhou("Título precisa ter pelo menos uma letra ou número.")
+
+    colecao: int | None = None
+    if colecao_id.strip():
+        try:
+            colecao = int(colecao_id)
+        except ValueError:
+            return falhou("Coleção inválida.")
+        with db.session() as conn:
+            if not conn.execute("SELECT 1 FROM collections WHERE id=?", (colecao,)).fetchone():
+                return falhou("Coleção não existe mais. Recarregue a página.")
 
     slug = f"{data}-{titulo_slug}"
     if not content.slug_valido(slug):
@@ -602,6 +657,7 @@ async def admin_publicar(
         "titulo": titulo,
         "data": data,
         "versiculo": versiculo.strip()[:120],
+        "colecao_id": colecao,
         "audio": audio_name,
         "apresentacao": pdf_name,
     }
@@ -611,6 +667,141 @@ async def admin_publicar(
     content.get_licoes_html.cache_clear()
 
     return RedirectResponse("/admin?publicado=1", status_code=303)
+
+
+# ---------- Admin: membros (inscrições, senha, exclusão) ----------
+
+def _volta_membros(param: str, msg: str):
+    return RedirectResponse(f"/admin/membros?{param}={quote(msg)}", status_code=303)
+
+
+@app.get("/admin/membros", response_class=HTMLResponse)
+def admin_membros(request: Request):
+    me = auth.require_admin(request)
+    with db.session() as conn:
+        rows = conn.execute("SELECT id, name, email, is_admin, status, created_at FROM members ORDER BY id").fetchall()
+    pendentes = [dict(r) for r in rows if r["status"] == "pendente"]
+    ativos = [dict(r) for r in rows if r["status"] == "ativo"]
+    return templates.TemplateResponse(request, "admin_membros.html", {
+        "pendentes": pendentes, "ativos": ativos, "me": me,
+        "ok_msg": request.query_params.get("ok"),
+        "erro_msg": request.query_params.get("erro"),
+        "senha_min": auth.SENHA_MIN,
+    })
+
+
+def _membro_ou_404(conn, member_id: int):
+    row = conn.execute("SELECT * FROM members WHERE id=?", (member_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Membro não encontrado.")
+    return row
+
+
+@app.post("/admin/membros/{member_id}/aprovar")
+def admin_membro_aprovar(request: Request, member_id: int):
+    auth.require_admin(request)
+    with db.session() as conn:
+        row = _membro_ou_404(conn, member_id)
+        conn.execute("UPDATE members SET status='ativo' WHERE id=?", (member_id,))
+    if row["email"] and mailer.email_habilitado():
+        link = f"{PUBLIC_URL}/login" if PUBLIC_URL else "/login"
+        enviar_email_silencioso(
+            row["email"], f"Sua inscrição no {APP_NOME} foi aprovada",
+            f"Olá, {primeiro_nome(row['name'])}.\n\nSua inscrição foi aprovada. Entre em: {link}",
+            f"<p>Olá, {primeiro_nome(row['name'])}.</p><p>Sua inscrição foi aprovada.</p><p>{botao_email(link, 'Entrar')}</p>",
+        )
+    return _volta_membros("ok", f"{row['name']} aprovado. Já pode entrar.")
+
+
+@app.post("/admin/membros/{member_id}/excluir")
+def admin_membro_excluir(request: Request, member_id: int):
+    me = auth.require_admin(request)
+    if member_id == me["id"]:
+        return _volta_membros("erro", "Você não pode excluir a própria conta.")
+    with db.session() as conn:
+        row = _membro_ou_404(conn, member_id)
+        for tabela in ("progress", "quiz_answers", "notes", "pin_resets"):
+            conn.execute(f"DELETE FROM {tabela} WHERE member_id=?", (member_id,))
+        conn.execute("DELETE FROM members WHERE id=?", (member_id,))
+    return _volta_membros("ok", f"{row['name']} excluído.")
+
+
+@app.post("/admin/membros/{member_id}/senha")
+def admin_membro_senha(request: Request, member_id: int, senha: str = Form(...)):
+    auth.require_admin(request)
+    if len(senha) < auth.SENHA_MIN:
+        return _volta_membros("erro", f"A senha precisa ter pelo menos {auth.SENHA_MIN} caracteres.")
+    with db.session() as conn:
+        row = _membro_ou_404(conn, member_id)
+        conn.execute("UPDATE members SET password_hash=? WHERE id=?", (auth.hash_senha(senha), member_id))
+    if row["email"]:
+        auth.registrar_acerto(row["email"])
+    return _volta_membros("ok", f"Senha de {row['name']} redefinida.")
+
+
+# ---------- Admin: coleções ----------
+
+def _volta_colecoes(param: str, msg: str):
+    return RedirectResponse(f"/admin/colecoes?{param}={quote(msg)}", status_code=303)
+
+
+@app.get("/admin/colecoes", response_class=HTMLResponse)
+def admin_colecoes(request: Request):
+    auth.require_admin(request)
+    contagem = content.count_by_collection()
+    with db.session() as conn:
+        cols = [dict(c, total=contagem.get(c["id"], 0)) for c in colecoes_por_id(conn).values()]
+    return templates.TemplateResponse(request, "admin_colecoes.html", {
+        "colecoes": cols,
+        "ok_msg": request.query_params.get("ok"),
+        "erro_msg": request.query_params.get("erro"),
+    })
+
+
+def _validar_colecao(nome: str, descricao: str) -> tuple[str, str] | str:
+    nome, descricao = nome.strip()[:80], descricao.strip()[:500]
+    if len(nome) < 2:
+        return "Dê um nome à coleção."
+    return nome, descricao
+
+
+@app.post("/admin/colecoes")
+def admin_colecao_criar(request: Request, nome: str = Form(...), descricao: str = Form("")):
+    auth.require_admin(request)
+    v = _validar_colecao(nome, descricao)
+    if isinstance(v, str):
+        return _volta_colecoes("erro", v)
+    nome, descricao = v
+    with db.session() as conn:
+        conn.execute("INSERT INTO collections (name, description, created_at) VALUES (?,?,?)", (nome, descricao, agora()))
+    return _volta_colecoes("ok", f"Coleção '{nome}' criada.")
+
+
+@app.post("/admin/colecoes/{colecao_id}/editar")
+def admin_colecao_editar(request: Request, colecao_id: int, nome: str = Form(...), descricao: str = Form("")):
+    auth.require_admin(request)
+    v = _validar_colecao(nome, descricao)
+    if isinstance(v, str):
+        return _volta_colecoes("erro", v)
+    nome, descricao = v
+    with db.session() as conn:
+        if not conn.execute("SELECT 1 FROM collections WHERE id=?", (colecao_id,)).fetchone():
+            raise HTTPException(404, "Coleção não encontrada.")
+        conn.execute("UPDATE collections SET name=?, description=? WHERE id=?", (nome, descricao, colecao_id))
+    return _volta_colecoes("ok", f"Coleção '{nome}' atualizada.")
+
+
+@app.post("/admin/colecoes/{colecao_id}/excluir")
+def admin_colecao_excluir(request: Request, colecao_id: int):
+    auth.require_admin(request)
+    if content.count_by_collection().get(colecao_id, 0) > 0:
+        return _volta_colecoes("erro", "Essa coleção tem devocionais. Mova ou apague as devocionais antes de excluir.")
+    with db.session() as conn:
+        row = conn.execute("SELECT name FROM collections WHERE id=?", (colecao_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Coleção não encontrada.")
+        conn.execute("DELETE FROM collections WHERE id=?", (colecao_id,))
+    return _volta_colecoes("ok", f"Coleção '{row['name']}' excluída.")
 
 
 # ---------- PWA ----------

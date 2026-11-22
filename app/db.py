@@ -2,7 +2,7 @@
 import sqlite3
 from pathlib import Path
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 
 DB_PATH = Path(__file__).parent / "data" / "portal.db"
 
@@ -10,8 +10,18 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS members (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
-    pin TEXT NOT NULL,
+    email TEXT,
+    password_hash TEXT,
+    pin TEXT,                        -- legado (primeira versão logava por PIN)
     is_admin INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'ativo',   -- pendente | ativo
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS collections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
 
@@ -58,6 +68,17 @@ CREATE TABLE IF NOT EXISTS notes (
 );
 """
 
+# Colunas que entraram depois da primeira versão (migração leve, idempotente).
+MIGRACOES_MEMBERS = {
+    "email": "ALTER TABLE members ADD COLUMN email TEXT",
+    "password_hash": "ALTER TABLE members ADD COLUMN password_hash TEXT",
+    "status": "ALTER TABLE members ADD COLUMN status TEXT NOT NULL DEFAULT 'ativo'",
+}
+
+
+def agora() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
 
 def get_conn() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -67,25 +88,29 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
-def init_db(seed_members: list[dict] | None = None) -> None:
+def init_db(admin: dict | None = None) -> None:
+    """Cria tabelas, aplica migrações e garante a conta do administrador.
+
+    admin = {"name", "email", "password_hash"}; se já existir membro com esse
+    e-mail, nada é sobrescrito (a senha pode ter sido trocada pela interface).
+    """
     conn = get_conn()
     conn.executescript(SCHEMA)
-    conn.commit()
-    # Migração leve: coluna email entrou depois da primeira versão.
     colunas = {r["name"] for r in conn.execute("PRAGMA table_info(members)").fetchall()}
-    if "email" not in colunas:
-        conn.execute("ALTER TABLE members ADD COLUMN email TEXT")
-        conn.commit()
-    if seed_members:
-        for m in seed_members:
-            existing = conn.execute(
-                "SELECT id FROM members WHERE name = ?", (m["name"],)
-            ).fetchone()
-            if not existing:
-                conn.execute(
-                    "INSERT INTO members (name, pin, is_admin, created_at) VALUES (?, ?, ?, ?)",
-                    (m["name"], m["pin"], int(m.get("is_admin", False)), datetime.utcnow().isoformat()),
-                )
+    for coluna, sql in MIGRACOES_MEMBERS.items():
+        if coluna not in colunas:
+            conn.execute(sql)
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_members_email ON members(email) WHERE email IS NOT NULL")
+    conn.commit()
+    if admin:
+        existing = conn.execute("SELECT id FROM members WHERE email = ?", (admin["email"],)).fetchone()
+        if not existing:
+            conn.execute(
+                "INSERT INTO members (name, email, password_hash, pin, is_admin, status, created_at) VALUES (?,?,?,'',1,'ativo',?)",
+                (admin["name"], admin["email"], admin["password_hash"], agora()),
+            )
+        else:
+            conn.execute("UPDATE members SET is_admin=1, status='ativo' WHERE id=?", (existing["id"],))
         conn.commit()
     conn.close()
 

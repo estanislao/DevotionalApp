@@ -4,7 +4,7 @@
 <div class="main" style="padding-top:28px">
   <a href="/" class="icon-btn" aria-label="Voltar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></a>
   <div style="display:flex; flex-direction:column; gap:8px">
-    <span style="font-size:13px; font-weight:600; color:var(--indigo)">Semana de {{ devo['data'] }}</span>
+    <span style="font-size:13px; font-weight:600; color:var(--indigo)">{% if devo.get('colecao_nome') %}{{ devo['colecao_nome'] }} · {% endif %}{{ devo['data'] }}</span>
     <h1 style="margin:0; font-size:28px; line-height:1.2; font-weight:700">{{ devo['titulo'] }}</h1>
     {% if devo.get('versiculo') %}<p class="verso" style="color:var(--text-soft)">{{ devo['versiculo'] }}</p>{% endif %}
   </div>

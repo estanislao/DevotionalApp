@@ -1,6 +1,6 @@
 # Portal de Devocionais
 
-App único (FastAPI + SQLite + HTML server-side) para publicar devocionais em família. Você publica, a família consome pelo celular como um PWA (instalável, sem precisar de app store).
+App único (FastAPI + SQLite + HTML server-side) para publicar devocionais em família. Você publica, a família consome pelo celular como um PWA (instalável, sem precisar de app store). Cada pessoa cria a própria conta (e-mail + senha), você aprova em `/admin/membros`, e as devocionais ficam organizadas em coleções que só o admin cria.
 
 ## O que tem aqui
 
@@ -9,8 +9,9 @@ app/                 código do servidor (FastAPI)
   main.py            rotas
   db.py              SQLite — membros, progresso, respostas do quiz, anotações
   content.py         lê as devocionais da pasta devocionais/
-  auth.py            login por PIN (cookie de sessão)
-  templates/         as 9 telas (login, início, trilha, ouvir, ler, slides, quiz, praticar, admin)
+  auth.py            login por e-mail + senha (PBKDF2), cookie de sessão, bloqueio por tentativas
+  templates/         telas: login, cadastro, esqueci/redefinir senha, início (abas Coleções e Últimas),
+                     coleção, trilha, ouvir, ler, slides, quiz, praticar, admin, membros, coleções, erro
   static/            CSS, manifest.json e ícones do PWA
 devocionais/         uma pasta por devocional (seus arquivos ficam aqui)
 Dockerfile
@@ -23,7 +24,7 @@ Caddyfile            troque pelo seu domínio
 
 Cada publicação cria `devocionais/<data>-<titulo-slug>/` com:
 
-- `meta.json` — título, data, versículo, nomes dos arquivos de áudio/pdf
+- `meta.json` — título, data, versículo, `colecao_id` (opcional), nomes dos arquivos de áudio/pdf
 - `texto.md` — o texto da leitura
 - `audio.mp3` (ou .m4a) — o áudio semelhante a podcast
 - `apresentacao.pdf` — os slides
@@ -43,7 +44,7 @@ rsync -avz --exclude 'app/data' ./ usuario@seu-ip:/opt/portal-devocional/
 # 2. Na VM:
 cd /opt/portal-devocional
 cp .env.example .env
-nano .env                    # preencha SESSION_SECRET (openssl rand -hex 32) e SEED_MEMBERS
+nano .env                    # preencha SESSION_SECRET (openssl rand -hex 32), ADMIN_EMAIL e ADMIN_PASSWORD
 # Caddyfile já está com trilhadefe.app; edite só se o domínio mudar
 
 # 3. Suba
@@ -73,11 +74,11 @@ www.trilhadefe.app {
 }
 ```
 
-e recarregue com `caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy`. Para subir o app: `docker compose up -d --build`. Para trocar a porta local, defina `APP_PORT` no `.env`. A família acessa, faz login com nome + PIN, e no Safari/Chrome do celular pode usar "Adicionar à tela de início" para instalar como app.
+e recarregue com `caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy`. Para subir o app: `docker compose up -d --build`. Para trocar a porta local, defina `APP_PORT` no `.env`.
 
 ### Publicando uma devocional nova
 
-Entre com o membro marcado como admin (no `.env`, é quem tem `:admin` depois do PIN em `SEED_MEMBERS`) e acesse `/admin`. Preencha o formulário e envie os 5 arquivos — a devocional aparece na hora para todo mundo.
+Entre como admin e acesse `/admin`. Escolha a coleção (opcional; crie antes em `/admin/colecoes`), preencha o formulário e envie os 5 arquivos — a devocional aparece na hora para todo mundo.
 
 O formulário valida antes de gravar: data no formato AAAA-MM-DD, áudio em .mp3/.m4a/.aac/.ogg/.wav, apresentação em .pdf, `quiz.json` no formato esperado (toda pergunta com `id`, `pergunta`, `opcoes`, `correta` presente nas opções). Se algo estiver errado, nada é gravado e a tela mostra o motivo. Publicar com o mesmo título e data de uma devocional existente é recusado (apague a pasta antiga em `devocionais/` se quiser substituir).
 
@@ -87,17 +88,19 @@ Dois lugares para copiar periodicamente:
 - a pasta `devocionais/` (seus arquivos originais)
 - o volume `db_data` (progresso e respostas): `docker compose exec app cat /srv/app/data/portal.db > backup-$(date +%F).db`
 
-### Trocar PIN, cadastrar e-mail ou adicionar alguém
+### Contas, aprovação e senhas
 
-- **Trocar PIN / e-mail**: como admin, abra `/admin/membros`. Cada membro tem um campo de e-mail (opcional) e um de novo PIN (em branco mantém o atual). Trocar o PIN também zera o bloqueio por tentativas erradas.
-- **Esqueci meu PIN**: se `BREVO_API_KEY` e `MAIL_FROM` estiverem no `.env`, a tela de login mostra o link "Esqueci meu PIN". A pessoa escolhe quem é e recebe no e-mail cadastrado um link que vale 30 minutos (um envio a cada 5 minutos por membro) para criar um PIN novo. Sem e-mail cadastrado, a tela orienta a falar com o admin.
-- **Adicionar alguém**: acrescente em `SEED_MEMBERS` no `.env` e rode `docker compose up -d --build` — membros novos são criados; os que já existem (mesmo nome) não são duplicados nem têm o PIN sobrescrito.
+- **Cadastro**: qualquer pessoa com o link cria conta em `/cadastro` (nome, e-mail, senha). A conta nasce *pendente* e não consegue entrar até você aprovar.
+- **Aprovar, recusar, excluir, redefinir senha**: tudo em `/admin/membros`. O admin não consegue excluir a própria conta. Se o e-mail estiver configurado, você recebe um aviso a cada inscrição nova e a pessoa recebe um aviso ao ser aprovada.
+- **Esqueci minha senha**: com `BREVO_API_KEY` e `MAIL_FROM` no `.env`, a tela de login mostra o link. A pessoa digita o e-mail e recebe um link de 30 minutos (um a cada 5 minutos) para criar senha nova. A resposta é a mesma exista a conta ou não.
+- **Coleções**: criadas e editadas só pelo admin em `/admin/colecoes` (nome e descrição). Não dá para excluir coleção que ainda tem devocionais. No início, a aba Coleções lista todas e a aba Últimas mostra as 10 mais recentes.
+- **Força bruta**: 5 senhas erradas seguidas bloqueiam o e-mail por 15 minutos (contador em memória, zera ao reiniciar).
 
 ## Rodando localmente (para testar antes de subir)
 
 ```bash
 pip install -r requirements.txt
-SESSION_SECRET=segredo-local-de-teste COOKIE_SECURE=0 SEED_MEMBERS="Membro 1:1111:admin,Membro 2:2222" \
+SESSION_SECRET=segredo-local-de-teste COOKIE_SECURE=0 ADMIN_EMAIL=admin@exemplo.com ADMIN_PASSWORD=senha-admin \
   uvicorn app.main:app --reload --port 8000
 ```
 
@@ -108,6 +111,6 @@ Abra `http://localhost:8000` — já tem uma devocional de exemplo em `devociona
 - **SQLite, não Postgres**: um arquivo só, zero servidor extra para administrar — adequado para 4 pessoas.
 - **Conclusão automática dos passos**: ouvir conta ao enviar o formulário no fim do áudio (hoje, ao clicar "Próximo passo" — dá pra trocar por um evento `timeupdate` do `<audio>` se quiser que seja automático de verdade), ler conta ao abrir a tela, slides ao abrir, quiz ao responder a última pergunta, praticar ao clicar "Concluir". Nada disso exige um botão de "marcar como feito" à parte.
 - **Sem LGPD/compliance formal**: como você pediu, não tem nada de consentimento, retenção de dados ou exportação — é uma família, 4 contas, dados ficam só no seu volume Docker.
-- **Segurança proporcional**: PIN de 4 dígitos é fraco por natureza, então o login bloqueia o membro por 15 minutos após 5 erros seguidos (contador em memória; reinicia com o container). O app recusa iniciar sem `SESSION_SECRET`, o cookie de sessão só trafega em HTTPS, a resposta certa do quiz é conferida no servidor (nunca vem do formulário) e só os arquivos declarados no `meta.json` são servidos pela rota de mídia. Erros (404, 403, formulário incompleto) mostram uma página amigável em vez de JSON.
-- **Recuperação de PIN por e-mail, não login por e-mail**: o login continua nome + PIN (rápido no celular, sem senha). O e-mail só serve para a pessoa redefinir o próprio PIN sem depender do admin. O envio usa a API HTTP da Brevo via `urllib`, sem dependência nova.
+- **Segurança proporcional**: bloqueio por 15 minutos após 5 senhas erradas (contador em memória; reinicia com o container). O app recusa iniciar sem `SESSION_SECRET`, o cookie de sessão só trafega em HTTPS, a resposta certa do quiz é conferida no servidor (nunca vem do formulário) e só os arquivos declarados no `meta.json` são servidos pela rota de mídia. Erros (404, 403, formulário incompleto) mostram uma página amigável em vez de JSON.
+- **Login por e-mail + senha com cadastro aberto e aprovação manual** (substituiu o PIN com membros fixos da primeira versão): quem entra escolhe o próprio nome; o admin é o filtro. Senhas com PBKDF2 da biblioteca padrão. E-mails pela API HTTP da Brevo via `urllib`, sem dependência nova.
 - **PWA simples**: dá para instalar na tela do celular e abre em tela cheia, mas não funciona 100% offline (só o CSS/ícones ficam em cache) — o conteúdo em si precisa de internet.

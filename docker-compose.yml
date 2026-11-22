@@ -4,7 +4,9 @@ services:
     restart: unless-stopped
     environment:
       - SESSION_SECRET=${SESSION_SECRET}
-      - SEED_MEMBERS=${SEED_MEMBERS}
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - ADMIN_NAME=${ADMIN_NAME:-Administrador}
       - COOKIE_SECURE=${COOKIE_SECURE:-1}
       - PUBLIC_URL=${PUBLIC_URL:-}
       - BREVO_API_KEY=${BREVO_API_KEY:-}

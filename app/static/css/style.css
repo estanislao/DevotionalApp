@@ -107,7 +107,7 @@ a:hover { color: var(--indigo-dark); }
 }
 
 .section-title { margin: 0; font-size: 16px; font-weight: 700; }
-.familia-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.familia-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
 .familia-item {
   background: var(--card); border-radius: 16px; padding: 12px 4px;
   display: flex; flex-direction: column; align-items: center; gap: 6px;
@@ -119,7 +119,7 @@ a:hover { color: var(--indigo-dark); }
   font-weight: 700; background: var(--indigo-tint); color: var(--indigo);
 }
 .familia-avatar.completo { background: var(--indigo); color: #fff; }
-.familia-nome { font-weight: 600; }
+.familia-nome { font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .familia-count { color: var(--text-soft); }
 
 .lista-anteriores { display: flex; flex-direction: column; gap: 10px; }
@@ -226,10 +226,12 @@ textarea.nota {
 }
 .campo { display: flex; flex-direction: column; gap: 6px; }
 .campo label { font-size: 13px; font-weight: 700; }
-.campo input[type=text], .campo input[type=date] {
+.campo input[type=text], .campo input[type=date], .campo input[type=email], .campo input[type=password], .campo select,
+.acoes input[type=password] {
   height: 48px; border: 1px solid #C9CDE6; border-radius: 14px; padding: 0 14px;
   background: var(--card); color: var(--text); font-family: inherit; font-size: 16px; width: 100%;
 }
+.campo select { appearance: none; -webkit-appearance: none; }
 .linhas-duplas { display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; }
 
 /* Login */
@@ -249,3 +251,43 @@ textarea.nota {
 
 iframe.pdf-embed { width: 100%; height: 520px; border: none; border-radius: 16px; background: #fff; }
 audio.player-nativo { width: 100%; }
+
+/* Abas (início) */
+.tabs { display: flex; background: var(--card); border-radius: 14px; padding: 4px; gap: 4px; }
+.tab {
+  flex: 1; height: 40px; border: none; border-radius: 11px; background: transparent;
+  font-family: inherit; font-size: 14px; font-weight: 600; color: var(--text-soft); cursor: pointer;
+}
+.tab.ativo { background: var(--indigo); color: #fff; }
+.colecao-card {
+  background: var(--card); border-radius: 16px; padding: 16px;
+  display: flex; align-items: center; gap: 12px; color: var(--text);
+}
+.colecao-card .titulo { font-size: 16px; font-weight: 700; }
+.colecao-card .descricao { font-size: 13px; color: var(--text-soft); line-height: 1.4; }
+.colecao-card .meta { font-size: 12px; color: var(--indigo); font-weight: 600; }
+.badge-num {
+  position: absolute; top: 12px; right: calc(50% - 26px);
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  background: var(--accent); color: var(--accent-text); font-size: 11px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pill { font-size: 11px; font-weight: 600; background: var(--indigo-tint); color: var(--indigo); padding: 3px 9px; border-radius: 999px; vertical-align: middle; }
+
+/* Admin: cartões e ações */
+.admin-links { display: flex; gap: 10px; }
+.admin-links .btn-secondary { flex: 1; display: flex; align-items: center; justify-content: center; text-decoration: none; }
+.cartao {
+  background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 16px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.cartao-cabecalho { display: flex; align-items: center; gap: 10px; }
+.acoes { display: flex; gap: 8px; }
+.acoes form { flex: 1; }
+.acoes button { width: 100%; }
+.btn-danger {
+  height: 44px; border: 1px solid #E3B4B4; border-radius: var(--radius);
+  background: transparent; color: var(--danger);
+  font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; padding: 0 14px;
+}
+.btn-danger[disabled] { opacity: .4; cursor: not-allowed; }

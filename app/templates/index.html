@@ -3,7 +3,7 @@
 {% block content %}
 <div class="topbar">
   <div class="greeting">
-    <div><span class="hello">Bom dia,</span><br><span class="name">{{ member['name'] }}</span></div>
+    <div><span class="hello">Olá,</span><br><span class="name">{{ member['name'].split(' ')[0] }}</span></div>
   </div>
   <a href="/logout" class="icon-btn" aria-label="Sair" title="Sair">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
@@ -12,7 +12,7 @@
 <div class="main">
   {% if destaque %}
   <div class="card-destaque">
-    <span class="badge">Devocional da semana</span>
+    <span class="badge">{{ destaque['colecao_nome'] or 'Devocional da semana' }}</span>
     <h1>{{ destaque['titulo'] }}</h1>
     {% if destaque.get('versiculo') %}<p class="verso">{{ destaque['versiculo'] }}</p>{% endif %}
     <div style="display:flex; flex-direction:column; gap:8px">
@@ -29,13 +29,13 @@
   </div>
   {% endif %}
 
-  {% if destaque %}
+  {% if destaque and familia %}
   <div style="display:flex; flex-direction:column; gap:12px">
     <h2 class="section-title">Esta semana em família</h2>
     <div class="familia-grid">
       {% for f in familia %}
       <div class="familia-item">
-        <span class="familia-avatar {% if f['done'] == f['total'] %}completo{% endif %}">{{ loop.index }}</span>
+        <span class="familia-avatar {% if f['done'] == f['total'] %}completo{% endif %}">{{ f['name'][:1] }}</span>
         <span class="familia-nome">{{ f['name'] }}</span>
         <span class="familia-count">{{ f['done'] }} de {{ f['total'] }}</span>
       </div>
@@ -44,24 +44,54 @@
   </div>
   {% endif %}
 
-  {% if anteriores %}
   <div style="display:flex; flex-direction:column; gap:12px">
-    <h2 class="section-title">Anteriores</h2>
-    <div class="lista-anteriores">
-      {% for a in anteriores %}
-      <a href="/d/{{ a['slug'] }}" class="item-anterior">
-        <span><span class="titulo">{{ a['titulo'] }}</span><br><span class="meta">{{ a['data'] }}</span></span>
+    <div class="tabs" role="tablist">
+      <button type="button" class="tab {{ 'ativo' if aba != 'ultimas' else '' }}" data-aba="colecao" onclick="mostrarAba('colecao')">Coleções</button>
+      <button type="button" class="tab {{ 'ativo' if aba == 'ultimas' else '' }}" data-aba="ultimas" onclick="mostrarAba('ultimas')">Últimas</button>
+    </div>
+
+    <div id="aba-colecao" class="lista-anteriores" {% if aba == 'ultimas' %}style="display:none"{% endif %}>
+      {% for c in colecoes %}
+      <a href="/colecao/{{ c['id'] }}" class="colecao-card">
+        <span style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:0">
+          <span class="titulo">{{ c['name'] }}</span>
+          {% if c['description'] %}<span class="descricao">{{ c['description'] }}</span>{% endif %}
+          <span class="meta">{{ c['total'] }} devocion{{ 'al' if c['total'] == 1 else 'ais' }}</span>
+        </span>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5B6180" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
       </a>
+      {% else %}
+      <p style="margin:0; color:var(--text-soft); font-size:14px">Nenhuma coleção ainda. As devocionais aparecem na aba Últimas.</p>
+      {% endfor %}
+      {% if avulsas and colecoes %}
+      <p style="margin:0; color:var(--text-soft); font-size:13px">{{ avulsas }} devocion{{ 'al' if avulsas == 1 else 'ais' }} sem coleção na aba Últimas.</p>
+      {% endif %}
+    </div>
+
+    <div id="aba-ultimas" class="lista-anteriores" {% if aba != 'ultimas' %}style="display:none"{% endif %}>
+      {% for a in ultimas %}
+      <a href="/d/{{ a['slug'] }}" class="item-anterior">
+        <span><span class="titulo">{{ a['titulo'] }}</span><br><span class="meta">{{ a['data'] }}{% if a['colecao_nome'] %} · {{ a['colecao_nome'] }}{% endif %}</span></span>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5B6180" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+      </a>
+      {% else %}
+      <p style="margin:0; color:var(--text-soft); font-size:14px">Nenhuma devocional publicada ainda.</p>
       {% endfor %}
     </div>
   </div>
-  {% endif %}
 </div>
 <nav class="nav-bottom">
   <span class="nav-item ativo"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6h-6v6H5a1 1 0 0 1-1-1z"/></svg>Início</span>
   {% if member['is_admin'] %}
-  <a href="/admin" class="nav-item"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.6V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.6 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.6 1z"/></svg>Admin</a>
+  <a href="/admin" class="nav-item" style="position:relative"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.6V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.6 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.6 1z"/></svg>Admin{% if pendentes %}<span class="badge-num">{{ pendentes }}</span>{% endif %}</a>
   {% endif %}
 </nav>
+<script>
+function mostrarAba(aba) {
+  document.getElementById('aba-colecao').style.display = aba === 'colecao' ? '' : 'none';
+  document.getElementById('aba-ultimas').style.display = aba === 'ultimas' ? '' : 'none';
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('ativo', t.dataset.aba === aba));
+  try { history.replaceState(null, '', aba === 'ultimas' ? '/?aba=ultimas' : '/'); } catch (e) {}
+}
+</script>
 {% endblock %}
