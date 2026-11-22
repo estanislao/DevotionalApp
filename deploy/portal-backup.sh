@@ -9,7 +9,6 @@ APP=${APP:-/opt/portal-devocional}
 DEST=${DEST:-/opt/backups/portal-devocional}
 RETENCAO_DIAS=${RETENCAO_DIAS:-14}
 STAMP=$(date +%F-%H%M)
-TMP_NO_CONTAINER=/tmp/backup-$STAMP-$$.db
 ARQ="$DEST/portal-$STAMP.db"
 
 falhou() { echo "$(date -Is) FALHA no backup: $1" >&2; rm -f "$ARQ" "$ARQ.gz"; exit 1; }
@@ -20,15 +19,19 @@ chmod 700 "$DEST"
 cd "$APP"
 
 # 1) Cópia consistente pela API de backup do SQLite (copiar o arquivo "no susto" pode pegar uma escrita pela metade).
-docker compose exec -T app python3 - "$TMP_NO_CONTAINER" <<'PY'
-import sqlite3, sys
+#    O arquivo sai pela saída padrão do contêiner direto para o host: o /tmp do contêiner é em memória e o
+#    "docker cp" não funciona com ele.
+docker compose exec -T app python3 - > "$ARQ" <<'PY'
+import os, sqlite3, sys
+temporario = "/tmp/backup-%d.db" % os.getpid()
 origem = sqlite3.connect("/srv/app/data/portal.db")
-destino = sqlite3.connect(sys.argv[1])
+destino = sqlite3.connect(temporario)
 origem.backup(destino)
-destino.close()
+destino.close(); origem.close()
+with open(temporario, "rb") as f:
+    sys.stdout.buffer.write(f.read())
+os.remove(temporario)
 PY
-docker compose cp "app:$TMP_NO_CONTAINER" "$ARQ" >/dev/null 2>&1
-docker compose exec -T app rm -f "$TMP_NO_CONTAINER"
 [ -s "$ARQ" ] || falhou "o arquivo de backup saiu vazio"
 
 # 2) Conferência de verdade: integridade, todas as tabelas esperadas e a mesma contagem de membros do banco vivo.
