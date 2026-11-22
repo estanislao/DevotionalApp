@@ -20,4 +20,6 @@ RUN useradd --system --uid 1000 --create-home portal \
 USER portal
 
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+# Quem pode mandar X-Forwarded-For vem da variável FORWARDED_ALLOW_IPS (veja o docker-compose.yml). Sem ela, o padrão
+# do Uvicorn é só 127.0.0.1: seguro, mas todos os visitantes pareceriam ter o mesmo IP atrás de um proxy.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
