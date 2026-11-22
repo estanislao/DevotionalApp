@@ -7,5 +7,6 @@
     <p style="margin:0; color:var(--text-soft); font-size:15px; line-height:1.5">{{ mensagem }}</p>
   </div>
   <a href="{{ voltar_url }}" class="btn-primary" style="display:flex; align-items:center; justify-content:center; text-decoration:none">{{ voltar_texto }}</a>
+  {% if extra_url %}<a href="{{ extra_url }}" style="text-align:center; font-size:14px; font-weight:600">{{ extra_texto }}</a>{% endif %}
 </div>
 {% endblock %}

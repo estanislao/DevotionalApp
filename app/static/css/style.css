@@ -299,3 +299,17 @@ audio.player-nativo { width: 100%; }
 .marca-sub { margin: 0; font-family: 'Newsreader', serif; font-style: italic; font-size: 19px; color: var(--text-soft); }
 .campo input::placeholder { color: #9AA0B8; }
 .login-rodape { margin-top: auto; padding-top: 40px; text-align: center; font-size: 14px; color: var(--text-soft); }
+
+.mostrar-senha { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text-soft); margin-top: -4px; cursor: pointer; }
+.mostrar-senha input { width: 18px; height: 18px; accent-color: var(--indigo); }
+
+/* Tela de confirmação (recuperar senha) */
+.confirmacao { display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
+.confirmacao-icone {
+  width: 72px; height: 72px; border-radius: 36px; background: var(--indigo-tint); color: var(--indigo);
+  display: flex; align-items: center; justify-content: center;
+}
+.confirmacao h1 { margin: 0; font-size: 24px; font-weight: 700; }
+.confirmacao p { margin: 0; color: var(--text-soft); font-size: 15px; line-height: 1.55; }
+.confirmacao .destaque { color: var(--text); font-weight: 700; }
+.passos-lista { text-align: left; background: var(--card); border-radius: 16px; padding: 14px 18px; font-size: 14px; color: var(--text-soft); line-height: 1.7; width: 100%; margin: 0; padding-left: 36px; }

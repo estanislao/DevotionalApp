@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#2E3192">
 <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Newsreader:ital,wght@0,400;0,500;1,400&display=swap">
-<link rel="stylesheet" href="/static/css/style.css">
+<link rel="stylesheet" href="/static/css/style.css?v=3">
 </head>
 <body>
 <div class="app {% block app_class %}{% endblock %}">
@@ -18,6 +18,21 @@
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
 }
+</script>
+<script>
+// "Mostrar senha": um botão ao lado do último campo de senha de cada formulário.
+document.querySelectorAll('form').forEach((form) => {
+  const campos = form.querySelectorAll('input[type=password]');
+  if (!campos.length) return;
+  const alvo = campos[campos.length - 1].closest('.campo') || campos[campos.length - 1];
+  const rotulo = document.createElement('label');
+  rotulo.className = 'mostrar-senha';
+  rotulo.innerHTML = '<input type="checkbox"> Mostrar senha';
+  rotulo.querySelector('input').addEventListener('change', (e) => {
+    campos.forEach((c) => { c.type = e.target.checked ? 'text' : 'password'; });
+  });
+  alvo.after(rotulo);
+});
 </script>
 </body>
 </html>

@@ -76,12 +76,13 @@ templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 # ---------- Páginas de erro amigáveis (em vez de JSON) ----------
 
-def pagina_erro(request: Request, status: int, titulo: str, mensagem: str):
+def pagina_erro(request: Request, status: int, titulo: str, mensagem: str, extra_url: str = "", extra_texto: str = ""):
     logado = auth.current_member(request) is not None
     return templates.TemplateResponse(request, "erro.html", {
         "titulo": titulo, "mensagem": mensagem,
         "voltar_url": "/" if logado else "/login",
         "voltar_texto": "Voltar ao início" if logado else "Ir para o login",
+        "extra_url": extra_url, "extra_texto": extra_texto,
     }, status_code=status)
 
 
@@ -162,7 +163,7 @@ def login_form(request: Request):
         return RedirectResponse("/")
     erro = request.query_params.get("erro")
     mensagens = {
-        "1": "E-mail ou senha incorretos.",
+        "1": "E-mail ou senha incorretos. Se você acabou de criar uma senha, use o mesmo e-mail que recebeu o link.",
         "pendente": "Sua inscrição ainda não foi aprovada pelo administrador.",
         "bloqueado": "Muitas tentativas erradas. Espere alguns minutos e tente de novo.",
     }
@@ -178,6 +179,18 @@ def login_form(request: Request):
     })
 
 
+def sessao_cookie(resp, member_id: int):
+    resp.set_cookie(
+        auth.COOKIE_NAME,
+        auth.make_session_cookie(member_id),
+        max_age=auth.MAX_AGE,
+        httponly=True,
+        secure=auth.COOKIE_SECURE,
+        samesite="lax",
+    )
+    return resp
+
+
 @app.post("/login")
 def login_submit(email: str = Form(...), senha: str = Form(...)):
     email = email.strip().lower()
@@ -191,16 +204,7 @@ def login_submit(email: str = Form(...), senha: str = Form(...)):
     if row["status"] != "ativo":
         return RedirectResponse("/login?erro=pendente", status_code=303)
     auth.registrar_acerto(email)
-    resp = RedirectResponse("/", status_code=303)
-    resp.set_cookie(
-        auth.COOKIE_NAME,
-        auth.make_session_cookie(row["id"]),
-        max_age=auth.MAX_AGE,
-        httponly=True,
-        secure=auth.COOKIE_SECURE,
-        samesite="lax",
-    )
-    return resp
+    return sessao_cookie(RedirectResponse("/", status_code=303), row["id"])
 
 
 @app.get("/logout")
@@ -270,8 +274,20 @@ def esqueci_form(request: Request):
         return RedirectResponse("/")
     return templates.TemplateResponse(request, "esqueci.html", {
         "email_habilitado": mailer.email_habilitado(),
-        "enviado": request.query_params.get("enviado"),
         "erro_msg": request.query_params.get("erro"),
+        "email": request.query_params.get("email", ""),
+    })
+
+
+def mascarar_email(email: str) -> str:
+    nome, _, dominio = email.partition("@")
+    return f"{nome[:1]}***@{dominio}" if dominio else email
+
+
+@app.get("/esqueci/enviado", response_class=HTMLResponse)
+def esqueci_enviado(request: Request):
+    return templates.TemplateResponse(request, "esqueci_enviado.html", {
+        "mascarado": mascarar_email(request.query_params.get("e", "seu e-mail")),
     })
 
 
@@ -281,7 +297,9 @@ def esqueci_enviar(request: Request, email: str = Form(...)):
     if not mailer.email_habilitado():
         return RedirectResponse(f"/esqueci?erro={quote('Envio de e-mail não está configurado. Fale com o administrador.')}", status_code=303)
     # Resposta é a mesma exista a conta ou não (não revela quem está cadastrado).
-    enviado = RedirectResponse("/esqueci?enviado=1", status_code=303)
+    if not EMAIL_RE.match(email):
+        return RedirectResponse(f"/esqueci?erro={quote('Digite um e-mail válido.')}&email={quote(email)}", status_code=303)
+    enviado = RedirectResponse(f"/esqueci/enviado?e={quote(email)}", status_code=303)
     with db.session() as conn:
         row = conn.execute("SELECT id, name, email FROM members WHERE email=? AND status='ativo'", (email,)).fetchone()
         if not row:
@@ -318,7 +336,8 @@ def _reset_valido(conn, token: str):
 
 
 LINK_VENCIDO = ("Link inválido ou vencido",
-                "Esse link já foi usado ou passou dos 30 minutos. Peça um novo em 'Recuperar senha'.")
+                "Esse link já foi usado ou passou dos 30 minutos. Peça um novo e use sempre o e-mail mais recente.",
+                "/esqueci", "Pedir um novo link")
 
 
 @app.get("/redefinir/{token}", response_class=HTMLResponse)
@@ -346,10 +365,11 @@ def redefinir_salvar(request: Request, token: str, senha: str = Form(...), senha
             return pagina_erro(request, 400, *LINK_VENCIDO)
         conn.execute("UPDATE members SET password_hash=? WHERE id=?", (auth.hash_senha(senha), reset["member_id"]))
         conn.execute("UPDATE pin_resets SET used_at=? WHERE id=?", (agora(), reset["id"]))
-        email = conn.execute("SELECT email FROM members WHERE id=?", (reset["member_id"],)).fetchone()["email"]
-    if email:
-        auth.registrar_acerto(email)
-    return RedirectResponse("/login?ok=senha", status_code=303)
+        membro = conn.execute("SELECT id, email FROM members WHERE id=?", (reset["member_id"],)).fetchone()
+    if membro["email"]:
+        auth.registrar_acerto(membro["email"])
+    # Quem abriu o link do e-mail já provou que é dono da conta: entra direto, sem digitar de novo.
+    return sessao_cookie(RedirectResponse("/", status_code=303), membro["id"])
 
 
 # ---------- Início ----------
