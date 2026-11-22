@@ -1,0 +1,4 @@
+# Backup diário do Trilha de Fé (para desligar, apague este arquivo)
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+30 3 * * * root /usr/local/bin/portal-backup.sh >> /var/log/portal-backup.log 2>&1

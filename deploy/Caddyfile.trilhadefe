@@ -1,0 +1,21 @@
+# Bloco do Trilha de Fé para o Caddyfile NATIVO da VM (/etc/caddy/Caddyfile), entre os marcadores abaixo.
+# Antes de recarregar:  caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
+# trilhadefe (inicio)
+trilhadefe.app {
+	encode zstd gzip
+	# Corpo de requisição: 250 MB só para publicar devocional; 1 MB em todo o resto
+	@publicar path /admin/publicar
+	request_body @publicar {
+		max_size 250MB
+	}
+	@resto not path /admin/publicar
+	request_body @resto {
+		max_size 1MB
+	}
+	reverse_proxy 127.0.0.1:8600
+}
+
+www.trilhadefe.app {
+	redir https://trilhadefe.app{uri} permanent
+}
+# trilhadefe (fim)

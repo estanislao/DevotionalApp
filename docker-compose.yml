@@ -3,6 +3,27 @@ services:
     build: .
     restart: unless-stopped
     mem_limit: 768m
+    pids_limit: 256
+    # Endurecimento: o sistema de arquivos da imagem é só leitura (o app grava apenas nos dois volumes
+    # abaixo e em /tmp), sem nenhuma capability de root e sem poder ganhar privilégio.
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/login', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     environment:
       - SESSION_SECRET=${SESSION_SECRET}
       - ADMIN_EMAIL=${ADMIN_EMAIL:-}

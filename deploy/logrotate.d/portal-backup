@@ -1,0 +1,7 @@
+/var/log/portal-backup.log {
+    weekly
+    rotate 8
+    compress
+    missingok
+    notifempty
+}
